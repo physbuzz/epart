@@ -269,6 +269,88 @@ void updateOnce(PGrid<float,2> &s,float radius,float dt){
     } 
 }
 
+struct PhysicsQueryStruct {
+    float s, n, px, py, beta;
+};
+inline float radialw(float r, float p,float rmax){
+    return (r>=rmax)?0.0f:(1.0f/(p+(r/rmax))-1.0f/(p+1.0f));
+}
+inline float radialwc(float rmax,float p){
+    return rmax*rmax*M_PI*(2.0f-1.0f/(1.0f+p)+2.0f*p*std::log(p/(1.0f+p)));
+}
+PhysicsQueryStruct querySimulation(PGrid<float,2> &s,VectorND<float,2> pos,float rmax, float p,float c){
+    PhysicsQueryStruct ret{0.0f,0.0f,0.0f,0.0f,0.0f};
+    VectorND<int,2> bound1=s.positionToIntvec(pos-VectorND<float,2>({rmax,rmax}));
+    VectorND<int,2> bound2=s.positionToIntvec(pos+VectorND<float,2>({rmax,rmax}));
+
+    VectorND<int,2> avec=s.positionToIntvec(pos);
+    //loop over all adjacent cells
+    for(int cx=bound1.x[0];cx<=bound2.x[0];cx++){
+        for(int cy=bound1.x[1];cy<=bound2.x[1];cy++){
+            //ignore cells that are out of bounds
+            if(cx<0
+                    ||cx>=s.numCells[0]
+                    ||cy<0
+                    ||cy>=s.numCells[1])
+                continue;
+            //loop over the particles in the adjacent cells
+            int bind=s.intvectorToIndex(VectorND<int,2>({cx,cy}));
+            for(size_t p2ind=0;p2ind<s.idarr[bind].size();p2ind++){
+                Particle<float,2> *p2=&((*s.plist)[s.idarr[bind][p2ind]]);
+                float r=(p2->pos-pos).length();
+                ret.n+=radialw(r,p,rmax);
+            }
+        }
+    }
+    ret.n/=c;
+    return ret;
+}
+
+
+
+void saveDensityImage(PGrid<float,2> &s,ParticleList<float,2> &pl,float radiusPrime, float p,
+        ImageParams ip,
+        std::string prefix, int fnamei, int padcount){
+
+    int imw=ip.imgw;
+    int imh=ip.imgh;
+
+    Image outimg(imw,imh);
+    float realsize=ip.realsize;
+    float cx=ip.cx;
+    float cy=ip.cy;
+    float aspect=float(imh)/imw;
+    float cc=radialwc(radiusPrime,p);
+
+
+    //reference number density.
+    //Average should be s.domainSize.product()/s.plist->size().
+    float nref=(3.0f*s.plist->size())/s.domainSize.product();
+
+    for(int a=0;a<imw;a++){
+        for(int b=0;b<imh;b++){
+            float x=cx+(float(a)/imw-0.5f)*realsize;
+            float y=cy+(float(b)/imh-0.5f)*realsize*aspect;
+            VectorND<float,2> pos({x,y});
+
+            auto q=querySimulation(s,pos,radiusPrime,p,cc);
+            float sc=q.n/nref;
+            outimg.put(a,b,intToRGB(sc*255,sc*255,sc*255));
+            /*
+            if(!accept){
+                float m=0.9f;
+                float c=std::cos(particleIndex);
+                float s=std::cos(particleIndex);
+                auto rgb=hsl2rgb(0.75*c*c+0.25*s,m*0.5f+0.25f,m);
+                outimg.put(a,b,intToRGB(rgb.r,rgb.g,rgb.b));
+            }
+            else
+                outimg.put(a,b,intToRGB(0,0,0));*/
+        }
+    }
+    outimg.save(getFilename(prefix,fnamei,padcount,".bmp"));
+}
+
 
 int main(){
     float temperature=1.0f;
@@ -290,28 +372,47 @@ int main(){
     
     const int maxtries=500;
     for(int i=0;i<nparticles;i++){
-        int j=0;
-        for(;j<maxtries;j++){
-            VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
-            int k=0;
-            for(;k<pl.plist.size();k++){
-                if((pnew-pl.plist[k].pos).length2()<4*radius*radius){
-                    break;
+        float vmag=std::sqrt(2*temperature);
+        float theta=(rand()*2.0f*M_PI)/RAND_MAX;
+
+        VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
+        VectorND<float,2> vnew({vmag*std::cos(theta),vmag*std::sin(theta)});
+        pl.plist.push_back(Particle<float,2>{pnew,vnew,pnew,vnew,-1});
+    }
+    PGrid<float,2> s(&pl.plist,domainSize,maxH);
+    s.rebuildGrid();
+    for(int passes=0;passes<5;passes++){
+        for(Particle<float,2> *p1 : s.updateLoop()){
+            int aind=s.getParticleIndex(*p1);
+            VectorND<int,2> avec=s.indexToIntvector(aind);
+            bool collisionfree=true;
+            //loop over all adjacent cells
+            for(int dx=-1;dx<=1 && collisionfree;dx++){
+                for(int dy=-1;dy<=1 && collisionfree;dy++){
+                    //ignore cells that are out of bounds
+                    if(avec[0]+dx<0
+                            ||avec[0]+dx>=s.numCells[0]
+                            ||avec[1]+dy<0
+                            ||avec[1]+dy>=s.numCells[1])
+                        continue;
+                    //loop over the particles in the adjacent cells
+                    int bind=s.intvectorToIndex(s.indexToIntvector(aind)+VectorND<int,2>({dx,dy}));
+                    for(size_t p2ind=0;p2ind<s.idarr[bind].size();p2ind++){
+                        Particle<float,2> *p2=&((*s.plist)[s.idarr[bind][p2ind]]);
+                        if(p1==p2)
+                            continue;
+                        if((p1->pos-p2->pos).length2()<4*radius*radius){
+                            collisionfree=false;
+                            break;
+                        }
+                    }
                 }
             }
-            if(k==pl.plist.size()){
-                float vmag=std::sqrt(2*temperature);
-                float theta=(rand()*2.0f*M_PI)/RAND_MAX;
-                VectorND<float,2> vnew({vmag*std::cos(theta),vmag*std::sin(theta)});
-                pl.plist.push_back(Particle<float,2>{pnew,vnew,pnew,vnew,-1});
-                break;
-            } 
-        }
-        if(j==maxtries) {
-            cout<<"Tried maxtries times and couldn't place new particle."<<endl;
+            VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
+            p1->pos=pnew;
+            p1->posnew=pnew;
         }
     }
-
     /*
             VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
     VectorND<float,2> pos1({1.0f-0.1,1.0f});
@@ -321,16 +422,14 @@ int main(){
     pl.plist.push_back(Particle<float,2>{pos1,vel1,pos1,vel1,-1});
     pl.plist.push_back(Particle<float,2>{pos2,vel2,pos2,vel2,-1});*/
 
-    PGrid<float,2> s(&pl.plist,domainSize,maxH);
-    s.rebuildGrid();
 
 
-    int nframes=200;
-    int frameskip=1;
+    int nframes=1000;
+    int frameskip=40;
     ImageParams ip{};
     ip.imgw=640;
     ip.imgh=480;
-    ip.realsize=0.05f;
+    ip.realsize=4.0f;
     ip.cx=2.0f;
     ip.cy=1.0f;
     for(int i=0;i<=nframes*frameskip;i++){
@@ -341,7 +440,14 @@ int main(){
                 e+=0.5*s.plist->at(j).vel.length2();
             }
             cout<<"On step "<<i<<". Energy is: "<<e<<endl;
-            saveImage(s,pl,radius,ip,"first",(i/frameskip),5);
+            //saveImage(s,pl,radius,{640,480,0.05f,2.0f,1.0f},"first",(i/frameskip),5);
+            saveDensityImage(s,pl,0.04f,0.05f,ip,"density",(i/frameskip),5);
+            //saveDensityImage(s,pl,0.015,1.0f,ip,"density",(i/frameskip),5);
+            float pp=1.0f;
+            float rr=0.015f;
+            auto q=querySimulation(s,VectorND<float,2>({0.5f,0.5f}),0.015,pp,radialwc(rr,pp));
+            cout<<q.n<<endl;
+
         }
     }
 
