@@ -156,6 +156,8 @@ void updateOnce(PGrid<float,2> &s,float radius,float dt){
 
     for(Particle<float,2> &p : *s.plist){
         p.collision=-1;
+        p.posnew=VectorND<float,2>({0.0f,0.0f});
+        p.velnew=VectorND<float,2>({0.0f,0.0f});
     }
 
     float radius2=radius*radius;
@@ -177,7 +179,7 @@ void updateOnce(PGrid<float,2> &s,float radius,float dt){
                 int bind=s.intvectorToIndex(s.indexToIntvector(aind)+VectorND<int,2>({dx,dy}));
                 for(size_t p2ind=0;p2ind<s.idarr[bind].size();p2ind++){
                     Particle<float,2> *p2=&((*s.plist)[s.idarr[bind][p2ind]]);
-                    if(p1==p2 || p2->collision==0)
+                    if(p1==p2 || p2->collision>=0)
                         continue;
                     auto x1=p1->pos;
                     auto x2=p2->pos;
@@ -231,11 +233,13 @@ void updateOnce(PGrid<float,2> &s,float radius,float dt){
                     //time evolve the rest of the way.
                     p1->posnew+=p1->velnew*t2;
                     p2->posnew+=p2->velnew*t2;
+                    //cout<<(p1->vel.length2()+p2->vel.length2()-p1->velnew.length2()-p2->velnew.length2())<<endl;
+                    break;
                 }
             }
         }
 
-        if(p1->collision<=0){
+        if(p1->collision<0){
             p1->posnew=p1->pos+dt*p1->vel;
             p1->velnew=p1->vel;
             p1->collision=0;
@@ -270,16 +274,16 @@ int main(){
     float temperature=1.0f;
     //Expected velocities are sqrt(2T/m)
     //time to cross a boundary ~= dx/sqrt(2T/m)
-    int nparticles=5000;
+    int nparticles=1000000;
 
 
 
 
-    float radius=0.003f;
+    float radius=0.0002f;
     float L=2.0f;
     VectorND<float,2> domainSize({2.0f*L,L});
-    float maxH=0.1f;
-    float dt=0.05/(6.0f*std::sqrt(2.0f*temperature));
+    float maxH=0.001f;
+    float dt=maxH/(6.0f*std::sqrt(2.0f*temperature));
     
 
     ParticleList<float,2> pl;
@@ -326,8 +330,8 @@ int main(){
     ImageParams ip{};
     ip.imgw=640;
     ip.imgh=480;
-    ip.realsize=1.5f;
-    ip.cx=1.0f;
+    ip.realsize=0.05f;
+    ip.cx=2.0f;
     ip.cy=1.0f;
     for(int i=0;i<=nframes*frameskip;i++){
         updateOnce(s,radius,dt);
