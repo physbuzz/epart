@@ -8,7 +8,7 @@
 #include "PGrid.h"
 #include "ImageUtil.h"
 
-#define EPS2 0.00000
+#define EPS2 0.0000001
 
 //Some string manipulation functions for saving files. pad_int(1234,5) returns "01234".
 std::string pad_int(int arg, int padcount) {
@@ -308,11 +308,15 @@ PhysicsQueryStruct querySimulation(PGrid<float,2> &s,VectorND<float,2> pos,float
             }
         }
     }
+    //If we didn't pick up any particles, just return zero.
+    if(ret.n<=EPS2)
+        return ret;
     //calculate the expected momentum and expected energy
     ret.px/=ret.n;
     ret.py/=ret.n;
     ret.e/=ret.n;
     float h=0.0f;
+    int nparticles=0;
     for(int cx=bound1.x[0];cx<=bound2.x[0];cx++){
         for(int cy=bound1.x[1];cy<=bound2.x[1];cy++){
             //ignore cells that are out of bounds
@@ -327,16 +331,25 @@ PhysicsQueryStruct querySimulation(PGrid<float,2> &s,VectorND<float,2> pos,float
                 Particle<float,2> *p2=&((*s.plist)[s.idarr[bind][p2ind]]);
                 float r=(p2->pos-pos).length();
                 float w=radialw(r,p,rmax);
+                if(w>0){
+                    nparticles++;
+                }
                 float p1x=p2->vel.x[0]-ret.px;
                 float p1y=p2->vel.x[1]-ret.py;
-                h+=0.5f*(p1x*p1x+p1y*p1y);
+                h+=0.5f*(p1x*p1x+p1y*p1y)*w;
             }
         }
     }
     ret.beta=ret.n/h;
     ret.n/=c;
-    float z11=100.0f;
-    ret.s=ret.n*(2.0f-std::log(ret.n*ret.beta/z11));
+    float z11=100000.0f;
+    ret.s=ret.n*(2.0f-log(ret.n*ret.beta/z11));
+
+    if(nparticles<=1){
+        //Can't estimate beta and s if there's only one particle
+        ret.beta=0.0f;
+        ret.s=0.0f;
+    }
     return ret;
 }
 
@@ -360,6 +373,7 @@ void saveDensityImage(PGrid<float,2> &s,ParticleList<float,2> &pl,float radiusPr
     //reference number density.
     //Average should be s.domainSize.product()/s.plist->size().
     float nref=(3.0f*s.plist->size())/s.domainSize.product();
+    float totals=0.0f;
 
     for(int a=0;a<imw;a++){
         for(int b=0;b<imh;b++){
@@ -370,6 +384,7 @@ void saveDensityImage(PGrid<float,2> &s,ParticleList<float,2> &pl,float radiusPr
             auto q=querySimulation(s,pos,radiusPrime,p,cc);
             float sc=q.n/nref;
             outimg.put(a,b,intToRGB(sc*255,sc*255,sc*255));
+            totals+=q.s*realsize*realsize*aspect/(imw*imh);
             /*
             if(!accept){
                 float m=0.9f;
@@ -382,7 +397,106 @@ void saveDensityImage(PGrid<float,2> &s,ParticleList<float,2> &pl,float radiusPr
                 outimg.put(a,b,intToRGB(0,0,0));*/
         }
     }
+    //auto q=querySimulation(s,VectorND<float,2>({0.5f,0.5f}),radiusPrime,p,cc);
+    //cout<<"Entropy density at some pos: "<<q.s<<endl;
+    //cout<<"Entropy: "<<totals<<endl;
     outimg.save(getFilename(prefix,fnamei,padcount,".bmp"));
+}
+
+void saveDensityImages(PGrid<float,2> &s,ParticleList<float,2> &pl,float radiusPrime, float p,
+        ImageParams ip,
+        std::string prefix, int fnamei, int padcount, float timevalue){
+    int imw=ip.imgw;
+    int imh=ip.imgh;
+
+    Image imgDensity(imw,imh);
+    Image imgpx(imw,imh);
+    Image imgpy(imw,imh);
+    Image imgs(imw,imh);
+    Image imge(imw,imh);
+
+
+    float realsize=ip.realsize;
+    float cx=ip.cx;
+    float cy=ip.cy;
+    float aspect=float(imh)/imw;
+    float cc=radialwc(radiusPrime,p);
+
+
+    //reference number density.
+    //Average should be s.domainSize.product()/s.plist->size().
+    float nref=(3.0f*s.plist->size())/s.domainSize.product();
+    float totals=0.0f;
+
+
+
+    float nref2=(1.0f*s.plist->size())/s.domainSize.product();
+    float z11=100000.0f;
+    float sref=nref2*(2.0f-std::log(nref2*1.0f/z11));
+    float srefmax=sref*1.5f;
+    float srefmin=sref/2.0f;
+    
+    float totaln=0.0f;
+    float totale=0.0f;
+
+
+    for(int a=0;a<imw;a++){
+        for(int b=0;b<imh;b++){
+            float x=cx+(float(a)/imw-0.5f)*realsize;
+            float y=cy+(float(b)/imh-0.5f)*realsize*aspect;
+            VectorND<float,2> pos({x,y});
+
+            auto q=querySimulation(s,pos,radiusPrime,p,cc);
+            totals+=q.s*realsize*realsize*aspect/(imw*imh);
+            totaln+=q.n*realsize*realsize*aspect/(imw*imh);
+            totale+=q.e*q.n*realsize*realsize*aspect/(imw*imh);
+
+            //Density map:
+            float sc=q.n/nref;
+            imgDensity.put(a,b,intToRGB(sc*255,sc*255,sc*255));
+
+            //momentum map:
+            sc=q.px;
+            int red=sc>0?int(std::log(1+sc)*90):0;
+            int blue=sc<0?int(std::log(1-sc)*90):0;
+            imgpx.put(a,b,intToRGB(red,0,blue));
+            //y momentum
+            sc=q.py/5.0;
+            //red=sc>0?int(sc*255):0;
+            //blue=sc<0?int(-sc*255):0;
+            red=sc>0?int(std::log(1+sc)*255):0;
+            blue=sc<0?int(std::log(1-sc)*255):0;
+            imgpy.put(a,b,intToRGB(red,0,blue));
+
+            //entropy picture
+            sc=(q.s-srefmin)/(srefmax-srefmin);
+            imgs.put(a,b,intToRGB(sc*255,sc*255,sc*255));
+
+            //energy picture
+            sc=std::log(1+q.e)/5.0;
+            imge.put(a,b,intToRGB(sc*255,sc*255,sc*255));
+
+            /*
+            if(!accept){
+                float m=0.9f;
+                float c=std::cos(particleIndex);
+                float s=std::cos(particleIndex);
+                auto rgb=hsl2rgb(0.75*c*c+0.25*s,m*0.5f+0.25f,m);
+                outimg.put(a,b,intToRGB(rgb.r,rgb.g,rgb.b));
+            }
+            else
+                outimg.put(a,b,intToRGB(0,0,0));*/
+        }
+    }
+    //auto q=querySimulation(s,VectorND<float,2>({0.5f,0.5f}),radiusPrime,p,cc);
+    //cout<<"Entropy density at some pos: "<<q.s<<endl;
+    cout<<timevalue<<", "<<totals<<", "<<totaln<<", "<<totale<<endl;
+    imgDensity.save(getFilename(prefix+"density",fnamei,padcount,".bmp"));
+    imgpx.save(getFilename(prefix+"px",fnamei,padcount,".bmp"));
+    imgpy.save(getFilename(prefix+"py",fnamei,padcount,".bmp"));
+    imgs.save(getFilename(prefix+"s",fnamei,padcount,".bmp"));
+    imge.save(getFilename(prefix+"e",fnamei,padcount,".bmp"));
+
 }
 
 
@@ -400,6 +514,7 @@ int main(){
     VectorND<float,2> domainSize({2.0f*L,L});
     float maxH=0.001f;
     float dt=maxH/(6.0f*std::sqrt(2.0f*temperature));
+    float timeelapsed=0.0f;
     
 
     ParticleList<float,2> pl;
@@ -458,7 +573,7 @@ int main(){
 
 
 
-    int nframes=1000;
+    int nframes=3000;
     int frameskip=40;
     ImageParams ip{};
     ip.imgw=640;
@@ -468,20 +583,24 @@ int main(){
     ip.cy=1.0f;
     for(int i=0;i<=nframes*frameskip;i++){
         updateOnce(s,radius,dt);
+        timeelapsed+=dt;
         if(i%frameskip==0){
             float e=0;
             for(int j=0;j<s.plist->size();j++){
                 e+=0.5*s.plist->at(j).vel.length2();
             }
-            cout<<"On step "<<i<<". Energy is: "<<e<<endl;
+            //cout<<"On step "<<i<<". Energy is: "<<e<<endl;
             //saveImage(s,pl,radius,{640,480,0.05f,2.0f,1.0f},"first",(i/frameskip),5);
-            saveDensityImage(s,pl,0.04f,0.05f,ip,"density",(i/frameskip),5);
+            //saveDensityImage(s,pl,0.04f,0.05f,ip,"density",(i/frameskip),5);
             //saveDensityImage(s,pl,0.015,1.0f,ip,"density",(i/frameskip),5);
-            float pp=1.0f;
-            float rr=0.015f;
-            auto q=querySimulation(s,VectorND<float,2>({0.5f,0.5f}),0.015,pp,radialwc(rr,pp));
-            cout<<q.n<<endl;
-
+            float pp=0.05f;
+            float rr=0.04f;
+            saveDensityImages(s,pl,rr,pp,ip,"run_",(i/frameskip),5,timeelapsed);
+            //auto q=querySimulation(s,VectorND<float,2>({0.5f,0.5f}),rr,pp,radialwc(rr,pp));
+            //cout<<q.n<<endl;
+        }
+        if((i/frameskip)%500==0){
+            pl.save("particlecheckpoint.txt");
         }
     }
 

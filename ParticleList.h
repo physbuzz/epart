@@ -61,6 +61,13 @@ public:
                     else 
                         pfile<<"\n";
                 }
+                for(int d=0;d<DIM;d++){
+                    pfile<<p.vel[d];
+                    if(d<DIM-1)
+                        pfile<<" ";
+                    else 
+                        pfile<<"\n";
+                }
             }
             pfile.close();
         } else {std::cerr<<"Could not open file "<<filename<<" for particle data writing";}
