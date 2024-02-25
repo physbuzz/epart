@@ -5,7 +5,7 @@
 #include "VectorND.h"
 #include "phystructs.h"
 #include "ParticleList.h"
-#include "PGrid.h"
+#include "PGridnew.h"
 #include "ImageUtil.h"
 
 #define EPS2 0.0000001
@@ -64,13 +64,14 @@ public:
     };
 
     CollisionStats stats;
-    PGrid<float,2> s;
+    PGridNew<float,2> s;
+    float maxH;
 
     CollisionSimulator(ParticleList<float,2> &pl, VectorND<float,2> domainSize, float maxH) :
         stats{},
-        s(&pl.plist,domainSize,maxH)
-    {
-    }
+        s(&pl.plist,domainSize,maxH),
+        maxH(maxH)
+    { }
 
 
     void updateOnce(float radius,float dt){
@@ -88,83 +89,66 @@ public:
 
         //TODO: make this generic
         for(Particle<float,2> *p1 : s.updateLoop()){
-            int aind=s.getParticleIndex(*p1);
-            VectorND<int,2> avec=s.indexToIntvector(aind);
-
-            //loop over all adjacent cells
-            for(int dx=-1;dx<=1 && (p1->collision<0);dx++){
-                for(int dy=-1;dy<=1 && (p1->collision<0);dy++){
-                    //ignore cells that are out of bounds
-                    if(avec[0]+dx<0
-                            ||avec[0]+dx>=s.numCells[0]
-                            ||avec[1]+dy<0
-                            ||avec[1]+dy>=s.numCells[1])
-                        continue;
-
-                    //loop over the particles in the adjacent cells
-                    int bind=s.intvectorToIndex(s.indexToIntvector(aind)+VectorND<int,2>({dx,dy}));
-                    for(size_t p2ind=0;p2ind<s.idarr[bind].size();p2ind++){
-                        Particle<float,2> *p2=&((*s.plist)[s.idarr[bind][p2ind]]);
-                        if(p1==p2)
-                            continue;
-                        auto x1=p1->pos;
-                        auto x2=p2->pos;
-                        auto v1=p1->vel;
-                        auto v2=p2->vel;
-                        auto dx=x2-x1;
-                        auto dv=v2-v1;
-                        float inner=dx.dot(dv);
-                        if(inner>=0)
-                            continue;
-                        float dv2=dv.length2();
-                        float d=inner*inner-dv2*(dx.length2()-4.0f*radius2);
-                        if(d<=0)
-                            continue;
-                        float t1=(-inner-sqrt(d))/dv2;
-                        if(t1<EPS2 || t1>dt)
-                            continue;
-                        //If we get to this point, there's a collision within time dt.
-                        //If the other particle has already undergone a collision, also ignore
-                        //but set a flag for it.
-                        //
-                        //Basically, we only ever handle collisions for two pairs of particles
-                        //with their collision flags set to -1.
-                        if(p2->collision>0){
-                            //This is not a perfect count of the number of double collisions. 
-                            //Need to double check that it has some bearing to ground truth!
-                            stats.nTwoOrMore+=1;
-                            stats.nOne-=1;
-                            continue;
-                        }
-
-                        float t2=dt-t1;
-                        p1->collision=1;
-                        p2->collision=1;
-                        stats.nOne+=2;
-
-                        p1->posnew=p1->pos+p1->vel*t1;
-                        p2->posnew=p2->pos+p2->vel*t1;
-                        //Collision of equal masses; we reverse each relative velocity along the direction
-                        //of their collision vector.
-                        //
-                        //Start with velocity v1. Put it in CM frame:
-                        //v1_CM=v1-(v1+v2)/2
-                        //reverse it along the rhat direction:
-                        //v1_CM -> v1_CM-2*rhat(rhat.dot(v1_CM))
-                        //add (v1+v2)/2 to put it back in non-CM and simplify:
-                        //v1_new = v1+2*rhat*rhat.dot((v2-v1)/2)
-                        //       = v1+rhat*rhat.dot(v2-v1)
-                        //cout<<(p2->posnew-p1->posnew).length()<<endl;
-                        auto dx2=(p2->posnew-p1->posnew).normalized();
-                        p1->velnew=p1->vel+dx2*dx2.dot(dv);
-                        p2->velnew=p2->vel-dx2*dx2.dot(dv);
-
-                        //time evolve the rest of the way.
-                        p1->posnew+=p1->velnew*t2;
-                        p2->posnew+=p2->velnew*t2;
-                        break;
-                    }
+            for(Particle<float,2> *p2 : s.nearbyLoop(p1->pos,maxH)){
+                assert(p2!=nullptr);
+                if(p1==p2 || p2->collision==0)
+                    continue;
+                auto x1=p1->pos;
+                auto x2=p2->pos;
+                auto v1=p1->vel;
+                auto v2=p2->vel;
+                auto dx=x2-x1;
+                auto dv=v2-v1;
+                float inner=dx.dot(dv);
+                if(inner>=0)
+                    continue;
+                float dv2=dv.length2();
+                float d=inner*inner-dv2*(dx.length2()-4.0f*radius2);
+                if(d<=0)
+                    continue;
+                float t1=(-inner-sqrt(d))/dv2;
+                if(t1<EPS2 || t1>dt)
+                    continue;
+                //If we get to this point, there's a collision within time dt.
+                //If the other particle has already undergone a collision, also ignore
+                //but set a flag for it.
+                //
+                //Basically, we only ever handle collisions for two pairs of particles
+                //with their collision flags set to -1.
+                if(p2->collision>0){
+                    //This is not a perfect count of the number of double collisions. 
+                    //Need to double check that it has some bearing to ground truth!
+                    stats.nTwoOrMore+=1;
+                    stats.nOne-=1;
+                    continue;
                 }
+
+                float t2=dt-t1;
+                p1->collision=1;
+                p2->collision=1;
+                stats.nOne+=2;
+
+                p1->posnew=p1->pos+p1->vel*t1;
+                p2->posnew=p2->pos+p2->vel*t1;
+                //Collision of equal masses; we reverse each relative velocity along the direction
+                //of their collision vector.
+                //
+                //Start with velocity v1. Put it in CM frame:
+                //v1_CM=v1-(v1+v2)/2
+                //reverse it along the rhat direction:
+                //v1_CM -> v1_CM-2*rhat(rhat.dot(v1_CM))
+                //add (v1+v2)/2 to put it back in non-CM and simplify:
+                //v1_new = v1+2*rhat*rhat.dot((v2-v1)/2)
+                //       = v1+rhat*rhat.dot(v2-v1)
+                //cout<<(p2->posnew-p1->posnew).length()<<endl;
+                auto dx2=(p2->posnew-p1->posnew).normalized();
+                p1->velnew=p1->vel+dx2*dx2.dot(dv);
+                p2->velnew=p2->vel-dx2*dx2.dot(dv);
+
+                //time evolve the rest of the way.
+                p1->posnew+=p1->velnew*t2;
+                p2->posnew+=p2->velnew*t2;
+                break;
             }
 
             if(p1->collision<0){
@@ -179,20 +163,20 @@ public:
                 p1->vel.x[0]=-p1->vel.x[0];
                 p1->pos.x[0]=-p1->pos.x[0];
             }
-            if(p1->posnew.x[0]>s.domainMax[0]){
+            if(p1->posnew.x[0]>s.domainSize[0]){
                 p1->vel.x[0]=-p1->vel.x[0];
-                p1->pos.x[0]=2*s.domainMax[0]-p1->pos.x[0];
+                p1->pos.x[0]=2*s.domainSize[0]-p1->pos.x[0];
             }
             if(p1->posnew.x[1]<0){
                 p1->vel.x[1]=-p1->vel.x[1];
                 p1->pos.x[1]=-p1->pos.x[1];
             }
-            if(p1->posnew.x[1]>s.domainMax[1]){
+            if(p1->posnew.x[1]>s.domainSize[1]){
                 p1->vel.x[1]=-p1->vel.x[1];
-                p1->pos.x[1]=2*s.domainMax[1]-p1->pos.x[1];
+                p1->pos.x[1]=2*s.domainSize[1]-p1->pos.x[1];
             }
             /* It's still possible to wind up with p1->pos outside the boundaries
-             * after these checks, but the PGrid updater will clamp the position to the
+             * after these checks, but the PGridNew updater will clamp the position to the
              * boundaries
              * */
         } 
@@ -204,33 +188,14 @@ public:
             c=radialwc(rmax,p);
 
         PhysicsQueryStruct ret{0.0f,0.0f,0.0f,0.0f,0.0f,0.0f};
-        VectorND<int,2> bound1=s.positionToIntvec(pos-VectorND<float,2>({rmax,rmax}));
-        VectorND<int,2> bound2=s.positionToIntvec(pos+VectorND<float,2>({rmax,rmax}));
 
-        VectorND<int,2> avec=s.positionToIntvec(pos);
-        //loop over all adjacent cells
-        //On the first pass, we can calculate <n> and <px>,<py>.
-        //But the parameter relevant for temperature needs a second pass.
-        for(int cx=bound1.x[0];cx<=bound2.x[0];cx++){
-            for(int cy=bound1.x[1];cy<=bound2.x[1];cy++){
-                //ignore cells that are out of bounds
-                if(cx<0
-                        ||cx>=s.numCells[0]
-                        ||cy<0
-                        ||cy>=s.numCells[1])
-                    continue;
-                //loop over the particles in the adjacent cells
-                int bind=s.intvectorToIndex(VectorND<int,2>({cx,cy}));
-                for(size_t p2ind=0;p2ind<s.idarr[bind].size();p2ind++){
-                    Particle<float,2> *p2=&((*s.plist)[s.idarr[bind][p2ind]]);
-                    float r=(p2->pos-pos).length();
-                    float w=radialw(r,p,rmax);
-                    ret.n+=w;
-                    ret.px+=p2->vel.x[0]*w;
-                    ret.py+=p2->vel.x[1]*w;
-                    ret.e+=0.5f*p2->vel.length2()*w;
-                }
-            }
+        for(Particle<float,2> *p2 : s.nearbyLoop(pos,rmax)){
+            float r=(p2->pos-pos).length();
+            float w=radialw(r,p,rmax);
+            ret.n+=w;
+            ret.px+=p2->vel.x[0]*w;
+            ret.py+=p2->vel.x[1]*w;
+            ret.e+=0.5f*p2->vel.length2()*w;
         }
         //If we didn't pick up any particles, just return zero.
         if(ret.n<=EPS2)
@@ -241,28 +206,15 @@ public:
         ret.e/=ret.n;
         float h=0.0f;
         int nparticles=0;
-        for(int cx=bound1.x[0];cx<=bound2.x[0];cx++){
-            for(int cy=bound1.x[1];cy<=bound2.x[1];cy++){
-                //ignore cells that are out of bounds
-                if(cx<0
-                        ||cx>=s.numCells[0]
-                        ||cy<0
-                        ||cy>=s.numCells[1])
-                    continue;
-                //loop over the particles in the adjacent cells
-                int bind=s.intvectorToIndex(VectorND<int,2>({cx,cy}));
-                for(size_t p2ind=0;p2ind<s.idarr[bind].size();p2ind++){
-                    Particle<float,2> *p2=&((*s.plist)[s.idarr[bind][p2ind]]);
-                    float r=(p2->pos-pos).length();
-                    float w=radialw(r,p,rmax);
-                    if(w>0){
-                        nparticles++;
-                    }
-                    float p1x=p2->vel.x[0]-ret.px;
-                    float p1y=p2->vel.x[1]-ret.py;
-                    h+=0.5f*(p1x*p1x+p1y*p1y)*w;
-                }
+        for(Particle<float,2> *p2 : s.nearbyLoop(pos,rmax)){
+            float r=(p2->pos-pos).length();
+            float w=radialw(r,p,rmax);
+            if(w>0){
+                nparticles++;
             }
+            float p1x=p2->vel.x[0]-ret.px;
+            float p1y=p2->vel.x[1]-ret.py;
+            h+=0.5f*(p1x*p1x+p1y*p1y)*w;
         }
         ret.beta=ret.n/h;
         ret.n/=c;
@@ -436,47 +388,43 @@ public:
         float aspect=float(imh)/imw;
 
         float drawRSquared=drawR*drawR;
+        int nParticlesChecked=0;
         for(int a=0;a<imw;a++){
             for(int b=0;b<imh;b++){
                 float x=cx+(float(a)/imw-0.5f)*realsize;
                 float y=cy+(float(b)/imh-0.5f)*realsize*aspect;
+                VectorND<float,2> pos({x,y});
+
+                float x2=cx+(float(a+1)/imw-0.5f)*realsize;
+                float y2=cy+(float(b+1)/imh-0.5f)*realsize*aspect;
+                VectorND<float,2> pos2({x2,y2});
+                if(!(s.positionToIntvec(pos)==s.positionToIntvec(pos2))){
+                    outimg.put(a,b,intToRGB(255,255,255));
+                    continue;
+                }
 
                 bool accept=true;
-                int particleIndex=0;
-                VectorND<float,2> pos({x,y});
-                VectorND<int,2> avec=s.positionToIntvec(pos);
-                //loop over all adjacent cells
-                for(int dx=-1;dx<=1 && accept;dx++){
-                    for(int dy=-1;dy<=1 && accept;dy++){
-                        if(avec[0]+dx<0
-                                ||avec[0]+dx>=s.numCells[0]
-                                ||avec[1]+dy<0
-                                ||avec[1]+dy>=s.numCells[1])
-                            continue;
+                for(Particle<float,2> *p2 : s.nearbyLoop(VectorND<float,2>({x,y}),radius)){
+                    nParticlesChecked++;
 
-                        //loop over the particles in the adjacent cells
-                        int bind=s.intvectorToIndex(avec+VectorND<int,2>({dx,dy}));
-                        for(size_t p2ind=0;p2ind<s.idarr[bind].size();p2ind++){
-                            Particle<float,2> *p2=&((*s.plist)[s.idarr[bind][p2ind]]);
-                            if((pos-p2->pos).length2()<drawRSquared) {
-                                accept=false;
-                                particleIndex=s.idarr[bind][p2ind];
-                                break;
-                            }
-                        }
+                    if((pos-p2->pos).length2()<drawRSquared) {
+                        accept=false;
+                        break;
                     }
                 }
                 if(!accept){
-                    float m=0.9f;
+                    /*float m=0.9f;
                     float c=std::cos(particleIndex);
                     float s=std::cos(particleIndex);
                     auto rgb=hsl2rgb(0.75*c*c+0.25*s,m*0.5f+0.25f,m);
-                    outimg.put(a,b,intToRGB(rgb.r,rgb.g,rgb.b));
+                    outimg.put(a,b,intToRGB(rgb.r,rgb.g,rgb.b));*/
+                    outimg.put(a,b,intToRGB(255,255,255));
                 }
                 else
                     outimg.put(a,b,intToRGB(0,0,0));
             }
         }
+        //cout<<"Checked "<<(float(nParticlesChecked)/(imw*imh))<<" particles per pixel"<<endl;
         outimg.save(getFilename(prefix,fnamei,padcount,".bmp"));
     }
 };
@@ -509,7 +457,7 @@ int main() {
         pl.plist.push_back(Particle<float,2>{pnew,vnew,pnew,vnew,-1});
     }
     CollisionSimulator cl(pl,domainSize,maxH);
-    PGrid<float,2> &s=cl.s;
+    PGridNew<float,2> &s=cl.s;
     s.rebuildGrid();
     for(int passes=0;passes<5;passes++){
         for(Particle<float,2> *p1 : s.updateLoop()){
@@ -554,8 +502,9 @@ int main() {
 
 
 
-    int nframes=5;
-    int frameskip=2;
+    /*
+    int nframes=50;
+    int frameskip=40;
     ImageParams ip{};
     ip.imgw=640;
     ip.imgh=480;
@@ -583,6 +532,31 @@ int main() {
         if((i/frameskip)%500==0){
             pl.save("particlecheckpoint.txt");
         }
+    }*/
+    cout<<"Done with initialization, doing the real loop:"<<endl;
+    int nframes=5;
+    int frameskip=1;
+    ImageParams ip{};
+    ip.imgw=640;
+    ip.imgh=480;
+    ip.realsize=4.00f;
+    ip.cx=2.0f;
+    ip.cy=1.0f;
+    for(int i=0;i<=nframes*frameskip;i++){
+        //cout<<"Frame "<<i<<endl;
+        cl.updateOnce(radius,dt);
+        timeelapsed+=dt;
+        if(i%frameskip==0){
+            float e=0;
+            for(int j=0;j<s.plist->size();j++){
+                e+=0.5*s.plist->at(j).vel.length2();
+            }
+            //cl.saveImage(radius,{640,480,0.05f,1.0f,1.0f},"lg",(i/frameskip),5);
+
+            float pp=0.05f;
+            float rr=0.04f;
+            cl.saveDensityImages(rr,pp,ip,"run_",(i/frameskip),5,timeelapsed);
+        }
     }
 
 
@@ -599,8 +573,6 @@ int main() {
         }
     }
     cout<<"Acceptance ratio: "<<(ratio/(frameskip*nframes))<<endl;*/
-
-
-
     return 0;
 }
+

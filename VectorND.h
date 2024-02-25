@@ -67,7 +67,7 @@ public:
         return x[arg];
     }
 
-    VectorND operator==(const VectorND& b) const {
+    bool operator==(const VectorND& b) const {
         bool ret=true;
         for(int i=0;i<DIM;i++){
             ret=ret&&(x[i]==b[i]);
