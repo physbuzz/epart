@@ -1,74 +1,29 @@
-#ifndef PGRID_H
-#define PGRID_H
+#ifndef PGRIDNEW_H
+#define PGRIDNEW_H
 #include <utility>
 #include <cstdlib>
 #include <cassert>
 #include <algorithm>
-
 #include "phystructs.h"
 
-
 template<typename Float,int DIM>
-class SlowParticleManager {
+class PGridNew {
 public:
-    std::vector<Particle<Float,DIM> > *plist;
-    SlowParticleManager() : plist(nullptr) { }
-
-
-    class SlowParticlePairIterator {
-        SlowParticleManager<Float,DIM> *p;
-        public:
-        size_t i;
-        size_t j;
-        SlowParticlePairIterator(SlowParticleManager<Float,DIM> *k,size_t position1=0,size_t position2=1) : p(k), i(position1), j(position2){ }
-        SlowParticlePairIterator& operator++() {
-            i++;
-            if(i>=j) {
-                i=0;
-                j++;
-            }
-            return *this;
-        }
-        std::pair<Particle<Float,DIM>*,Particle<Float,DIM>*> operator*() const {
-            return std::make_pair(&(*p->plist)[i],&(*p->plist)[j]);
-        }
-        bool operator!=(const SlowParticlePairIterator &other){
-            return (i!=other.i || j!=other.j);
-        }
-    };
-
-    class SlowParticlePairRange{
-        SlowParticleManager<Float,DIM> *p;
-        public:
-        SlowParticlePairRange(SlowParticleManager<Float,DIM> *p) : p(p){ }
-
-        SlowParticlePairIterator begin() { 
-            return SlowParticlePairIterator(p,0,1);
-        }
-        SlowParticlePairIterator end() { 
-            return SlowParticlePairIterator(p,0,p->plist->size());
-        }
-    };
-
-    SlowParticlePairRange pairs(){
-        return SlowParticlePairRange(this);
-    }
-
-};
-
-template<typename Float,int DIM>
-class PGrid {
-public:
-    static_assert(0<DIM,"PGrid DIM must be positive.");
+    static_assert(0<DIM,"PGridNew DIM must be positive.");
 
     std::vector<std::vector<size_t> > idarr;
+
+    //integer number of cells in each dimension
     VectorND<int,DIM> numCells;
+
+    //Box dimensions of each cell
     VectorND<Float,DIM> boxWidth;
+
+    //Upper bounds on the particle locations
     VectorND<Float,DIM> domainSize;
-    VectorND<Float,DIM> domainMax;//iota smaller than domainSize.
+
     bool needsRebuild;
     size_t productOfSizes;
-    Float maxH;
 
     //sanity check: for DIM=3...
     //ret=arg[2]
@@ -97,6 +52,7 @@ public:
     //Update the particle at (*plist)[pind] from grid position aind to position bind.
     void particleChangeGrid(size_t pind, size_t aind, size_t bind){
     //std::vector<std::vector<size_t> > idarr;
+        
         assert(aind<idarr.size()&&bind<idarr.size());
         std::vector<size_t>::iterator pos=std::find(idarr[aind].begin(),idarr[aind].end(),pind);
         assert(pos!=idarr[aind].end());
@@ -105,35 +61,28 @@ public:
     }
     std::vector<Particle<Float,DIM> > *plist;
 
-    PGrid &operator=(const PGrid&) = delete;
-    PGrid(const PGrid&) = delete;
-    PGrid() : plist(nullptr) { }
-    PGrid(std::vector<Particle<Float,DIM> > *plist) : idarr(), numCells(), boxWidth(), domainSize(), 
-        domainMax(), needsRebuild(true), productOfSizes(1), maxH(1), plist(nullptr) { }
+    PGridNew &operator=(const PGridNew&) = delete;
+    PGridNew(const PGridNew&) = delete;
+    PGridNew() : plist(nullptr) { }
+    PGridNew(std::vector<Particle<Float,DIM> > *plist) : idarr(), numCells(), boxWidth(), domainSize(), 
+        needsRebuild(true), productOfSizes(1), plist(nullptr) { }
 
-    PGrid(std::vector<Particle<Float,DIM> > *plist,VectorND<Float,DIM> domainSize,Float maxH) : 
+    PGridNew(std::vector<Particle<Float,DIM> > *plist,VectorND<Float,DIM> domainSize,Float maxH) : 
         idarr(), numCells(), boxWidth(), domainSize(), 
-        domainMax(), needsRebuild(true), productOfSizes(0), 
-        maxH(maxH), plist(plist) {
+        needsRebuild(true), productOfSizes(0), 
+        plist(plist) {
         setParams(domainSize,maxH);
     }
 
     void setParams(VectorND<Float,DIM> domainSize,Float maxH){
         assert(maxH>0 &&domainSize.min()>Float(0));
-        this->maxH=maxH;
         this->productOfSizes=1;
-        //The guarantee that we want is that:
-        //  1. With clamped boundary conditions, we apply "if(particle.x[i]>domainMax[i]) particle.x[i]=domainMax[i];", 
-        //  and for periodic boundary conditions, "if(particle.x[i]>domainMax[i]) particle.x[i]=std::fmod(particle.x[i],domainSize[i])"
-        //  2. After applying boundary conditions, 0<=size_t(particle.x[i]/boxWidth[i])<numCells[i].
+        this->domainSize=domainSize;
         for(size_t i=0;i<DIM;i++){
-            this->numCells[i]=size_t(domainSize[i]/maxH);
-            this->numCells[i]=std::max(this->numCells[i],1);
+            this->numCells[i]=std::max(int(domainSize[i]/maxH),1);
             this->boxWidth[i]=domainSize[i]/this->numCells[i];
-            this->domainSize[i]=this->boxWidth[i]*this->numCells[i]; //condition 2
-            this->domainMax[i]=std::nextafter(0.9999*domainSize[i],Float(0)); // condition 1
-            productOfSizes*=this->numCells[i];
         }
+        this->productOfSizes=this->numCells.product();
         needsRebuild=true;
     }
 
@@ -142,7 +91,6 @@ public:
         needsRebuild=true;
     }
 
-
     VectorND<int,DIM> positionToIntvec(const VectorND<Float,DIM> &arg){
         VectorND<int,DIM> ivec;
         for(int i=0;i<DIM;i++){
@@ -150,52 +98,28 @@ public:
         }
         return ivec;
     }
-    size_t getParticleIndex(Particle<Float,DIM> &arg){
+    VectorND<int,DIM> positionToIntvecClamped(const VectorND<Float,DIM> &arg){
         VectorND<int,DIM> ivec;
         for(int i=0;i<DIM;i++){
-            if(!((arg.pos[i]/boxWidth[i])<numCells[i])){
-                std::cout<<"Pesky out of bounds bug."<<std::endl;
-                std::cout<<"i: "<<i<<std::endl;
-                std::cout<<"pos: "<<arg.pos<<std::endl;
-                std::cout<<"ratio[i]: "<<int(std::floor(arg.pos[i]/boxWidth[i]))<<std::endl;
-                std::cout<<"numCells[i]: "<<numCells[i]<<std::endl;
-            
-                arg.pos.clampCube(VectorND<Float,DIM>(),domainMax);
-                std::cout<<"domainmax: "<<domainMax[i]<<std::endl;
-                std::cout<<"ratio[i]: "<<int(std::floor(arg.pos[i]/boxWidth[i]))<<std::endl;
-            }
-            assert((arg.pos[i]/boxWidth[i])>=0);
-            assert((arg.pos[i]/boxWidth[i])<numCells[i]);
-            ivec[i]=std::floor(arg.pos[i]/boxWidth[i]);
+            ivec[i]=std::clamp(int(arg[i]/boxWidth[i]),0,numCells[i]-1);
         }
+        return ivec;
+    }
+
+    size_t getParticleIndex(Particle<Float,DIM> &arg){
+        VectorND<int,DIM> ivec=positionToIntvecClamped(arg.pos);
         return intvectorToIndex(ivec);
     }
 
     void rebuildGrid(){
         assert(productOfSizes>0);
         assert(plist!=nullptr);
-
-        //std::cout<<"Product of Sizes: "<<productOfSizes<<std::endl;
-        
         idarr=std::vector<std::vector<size_t> >(productOfSizes);
-        for(size_t n=0;n<plist->size();n++) {
-            (*plist)[n].pos.clampCube(VectorND<Float,DIM>(),domainMax);
-            VectorND<int,DIM> ivec;
-            for(int i=0;i<DIM;i++){
-                assert(((*plist)[n].pos[i]/boxWidth[i])>=0);
-                //std::cout<<((*plist)[n].pos[i]/boxWidth[i])<<std::endl;
-                //std::cout<<domainSize[i]<<std::endl;
-                assert(((*plist)[n].pos[i]/boxWidth[i])<numCells[i]);
-                ivec[i]=std::floor((*plist)[n].pos[i]/boxWidth[i]);
-            }
-            //size_t indx=intvectorToIndex(ivec);
-            //std::cout<<"Index of particle "<<n<<" is "<<indx<<std::endl;
-
-            //idarr[].push_back(n);
-            //in 2d: idarr[idy*numCellsX+idx].push_back(n);
+        for(size_t pindx=0;pindx<plist->size();pindx++) {
+            (*plist)[pindx].pos.clampCube(VectorND<Float,DIM>(),domainSize);
+            VectorND<int,DIM> ivec=positionToIntvecClamped((*plist)[pindx].pos);
             int idx=intvectorToIndex(ivec);
-            assert(0<=idx && idx<idarr.size());
-            idarr[idx].push_back(n);
+            idarr.at(idx).push_back(pindx);
         }
         needsRebuild=false;
     }
@@ -204,9 +128,9 @@ public:
 
     //Do this after the iterators!
     //void timestepGrid(Float dt); 
-
-    class PGridPairIt {
-        PGrid<Float,DIM> *pg;
+    /*
+    class PGridNewPairIt {
+        PGridNew<Float,DIM> *pg;
         VectorND<int,DIM> a;
         size_t i;
         VectorND<int,DIM> da;
@@ -315,7 +239,7 @@ public:
         public:
         Particle<Float,DIM> *first;
         Particle<Float,DIM> *second;
-        explicit PGridPairIt(PGrid<Float,DIM> *pg,size_t aind=0) : 
+        explicit PGridNewPairIt(PGridNew<Float,DIM> *pg,size_t aind=0) : 
             pg(pg), a(), i(0), da(), j(1), aind(aind), bind(aind), first(nullptr),second(nullptr) { 
             a=pg->indexToIntvector(aind);
             while(!isEmpty()&&!isValid()){
@@ -329,38 +253,44 @@ public:
         bool isEmpty(){
             return aind>=pg->productOfSizes;
         }
-        PGridPairIt& operator++() {
+        PGridNewPairIt& operator++() {
             pop_front();
             return *this;
         }
         std::pair<Particle<Float,DIM>*,Particle<Float,DIM>*> operator*() const {
             return std::make_pair(first,second);
         }
-        bool operator==(const PGridPairIt &other){
+        bool operator==(const PGridNewPairIt &other){
             assert(pg==other.pg);
             return (aind>=pg->idarr.size() && other.aind>=pg->idarr.size())||(
                     aind==other.aind&&bind==other.bind&&i==other.i&&j==other.j);
         }
-        bool operator!=(const PGridPairIt &other){
+        bool operator!=(const PGridNewPairIt &other){
             return !(operator==(other));
         }
     };
 
-    class PGridPairRange{
-        PGrid<Float,DIM> *pg;
+    class PGridNewPairRange{
+        PGridNew<Float,DIM> *pg;
         public:
-        PGridPairRange(PGrid<Float,DIM> *pg) : pg(pg){ }
+        PGridNewPairRange(PGridNew<Float,DIM> *pg) : pg(pg){ }
 
-        PGridPairIt begin() { 
-            return PGridPairIt(pg,0);
+        PGridNewPairIt begin() { 
+            return PGridNewPairIt(pg,0);
         }
-        PGridPairIt end() { 
-            return PGridPairIt(pg,pg->plist->size());
+        PGridNewPairIt end() { 
+            return PGridNewPairIt(pg,pg->plist->size());
         }
-    };
+    }; 
 
-    class PGridUpdateIt {
-        PGrid<Float,DIM> *pg;
+    PGridNewPairRange pairs(){
+        return PGridNewPairRange(this);
+    }
+    
+    */
+
+    class PGridNewUpdateIt {
+        PGridNew<Float,DIM> *pg;
         size_t pind; // index into pg->plist
         size_t aind; // index into pg->idarr
         void updateAIndex(){
@@ -374,12 +304,12 @@ public:
         }
     public:
         Particle<Float,DIM> *part;
-        PGridUpdateIt(PGrid<Float,DIM> *pg,size_t pind) : pg(pg),pind(pind),aind(0),part(nullptr) { 
+        PGridNewUpdateIt(PGridNew<Float,DIM> *pg,size_t pind) : pg(pg),pind(pind),aind(0),part(nullptr) { 
             updateAIndex();
         }
 
-        PGridUpdateIt& operator++() {
-            (*pg->plist)[pind].pos.clampCube(VectorND<Float,DIM>(),pg->domainMax);
+        PGridNewUpdateIt& operator++() {
+            (*pg->plist)[pind].pos.clampCube(VectorND<Float,DIM>(),pg->domainSize);
             size_t aind_new=pg->getParticleIndex((*pg->plist)[pind]);
             if(aind!=aind_new){
                 pg->particleChangeGrid(pind,aind,aind_new);
@@ -391,32 +321,178 @@ public:
         Particle<Float,DIM>* operator*() const {
             return part;
         }
-        bool operator!=(const PGridUpdateIt &other) const {
+        bool operator!=(const PGridNewUpdateIt &other) const {
             assert(pg==other.pg);
             return (pind!=other.pind);
         }
-
-
     };
-    class PGridUpdateRange {
-        PGrid<Float,DIM> *pg;
+    class PGridNewUpdateRange {
+        PGridNew<Float,DIM> *pg;
     public:
-        PGridUpdateRange(PGrid<Float,DIM> *pg) : pg(pg){ }
+        PGridNewUpdateRange(PGridNew<Float,DIM> *pg) : pg(pg){ }
 
-        PGridUpdateIt begin() { 
-            return PGridUpdateIt(pg,0);
+        PGridNewUpdateIt begin() { 
+            return PGridNewUpdateIt(pg,0);
         }
-        PGridUpdateIt end() { 
-            return PGridUpdateIt(pg,pg->plist->size());
+        PGridNewUpdateIt end() { 
+            return PGridNewUpdateIt(pg,pg->plist->size());
         }
     };
-
-    PGridPairRange pairs(){
-        return PGridPairRange(this);
-    }
-    PGridUpdateRange updateLoop(){
-        return PGridUpdateRange(this);
+    PGridNewUpdateRange updateLoop(){
+        return PGridNewUpdateRange(this);
     }
 
+
+
+
+    class PGridNewRectIt {
+        PGridNew<Float,DIM> *pg;
+
+        //Lowest coordinate in the search rectangle (inclusive)
+        VectorND<int,DIM> bl;
+        //Highest coordinate in the search rectangle (exclusive)
+        VectorND<int,DIM> tr;
+        //We look at all grid coordinates with bl[k]<=loc[k]<tr[k].
+        VectorND<int,DIM> loc;
+
+        // index into pg->idarr
+        size_t aind; 
+        // index into pg->plist
+        size_t pind;
+
+
+        void stepAind(){
+            //Increase loc[0]. If we reach the bound tr[0],
+            //set loc[0]=bl[0] and increase loc[1], etc.
+            for(int k=0;k<DIM;k++) {
+                loc[k]++;
+                if(loc[k]>=tr[k])
+                    loc[k]=bl[k];
+                else {
+                    aind=pg->intvectorToIndex(loc);
+                    return;
+                }
+            }
+            //If we reach here then we've just set loc[DIM-1]=bl[DIM-1],
+            //but we want the iterator to be empty now.
+            loc=tr;
+            aind=pg->intvectorToIndex(loc);
+        }
+        bool isEmpty(){
+            return loc==tr;
+        }
+        bool isValid(){
+            return (!isEmpty())&&pind<pg->idarr[aind].size();
+        }
+
+        void pop_front(){
+            if(isEmpty())
+                return;
+            assert(!(pg->needsRebuild));
+            assert(aind>=0 && aind<pg->idarr.size());
+
+            //If there are particles left in the current cell, get the next one.
+            pind++;
+            if(pind<pg->idarr[aind].size()){
+                partptr=&((*(pg->plist))[(pg->idarr[aind])[pind]]);
+                return;
+            }
+
+            //Else find the next nonempty cell, if there is one.
+            pind=0;
+            stepAind();
+            while(!isEmpty() && pg->idarr[aind].size()==0){
+                stepAind();
+            }
+            if(isEmpty()){
+                partptr=nullptr;
+            } else {
+                partptr=&((*(pg->plist))[(pg->idarr[aind])[pind]]);
+            }
+        }
+        public:
+
+        Particle<Float,DIM> *partptr;
+
+        explicit PGridNewRectIt(PGridNew<Float,DIM> *pg,VectorND<int,DIM> bl,VectorND<int,DIM> tr) : 
+            pg(pg), bl(bl),tr(tr), loc(bl), aind(0),pind(0), partptr(nullptr){ 
+
+            for(int k=0;k<DIM;k++){
+                //Iterator expects that the passed in coordinates are inside the simulation domain
+                //assert(bl[k]>=0 && bl[k]<pg->numCells[k]);
+                //assert(tr[k]>=1 && tr[k]<=pg->numCells[k]);
+            }
+            aind=pg->intvectorToIndex(loc);
+            if(isEmpty())
+                return;
+            if(isValid())
+                partptr=&((*(pg->plist))[(pg->idarr[aind])[pind]]);
+            else
+                pop_front();
+        }
+        //Used to construct the end iterator with PGridNewRectIt(pg,bl,tr,tr);
+        explicit PGridNewRectIt(PGridNew<Float,DIM> *pg,VectorND<int,DIM> bl,VectorND<int,DIM> tr, VectorND<int,DIM> loc) : 
+            pg(pg), bl(bl),tr(tr), loc(loc), aind(0),pind(0), partptr(nullptr){ 
+
+            for(int k=0;k<DIM;k++){
+                //Iterator expects that the passed in coordinates are inside the simulation domain
+                //assert(bl[k]>=0 && tr[k]<=pg->numCells[k]);
+            }
+            aind=pg->intvectorToIndex(loc);
+            pop_front();
+        }
+        PGridNewRectIt& operator++() {
+            pop_front();
+            return *this;
+        }
+        Particle<Float,DIM>* operator*() const {
+            return partptr;
+        }
+        bool operator!=(const PGridNewRectIt &other){
+            return !(this->isEmpty());
+        }
+    };
+    class PGridNewNearbyRange {
+        PGridNew<Float,DIM> *pg;
+        VectorND<Float,DIM> pos;
+        Float r;
+        VectorND<int,DIM> bl;
+        VectorND<int,DIM> tr;
+    public:
+        PGridNewNearbyRange(PGridNew<Float,DIM> *pg, VectorND<Float,DIM> pos, Float r) : 
+            pg(pg), pos(pos), r(r),bl(),tr(){ 
+
+            VectorND<Float,DIM> blcoord;
+            VectorND<Float,DIM> trcoord;
+            for(int k=0;k<DIM;k++){
+                blcoord[k]=pos[k]-r;
+                trcoord[k]=pos[k]+r;
+            }
+            bl=pg->positionToIntvec(blcoord);
+            tr=pg->positionToIntvec(trcoord);
+            for(int k=0;k<DIM;k++){
+                tr[k]=tr[k]+1;
+            }
+            bl.clampCube(VectorND<int,DIM>(),pg->numCells);
+            tr.clampCube(VectorND<int,DIM>(),pg->numCells);
+
+            bool empty=false;
+            for(int k=0;k<DIM;k++){
+                if(bl[k]==tr[k])
+                    empty=true;
+            }
+            if(empty)
+                bl=tr;
+        }
+        PGridNewRectIt begin() { 
+            return PGridNewRectIt(pg,bl,tr);
+        }
+        PGridNewRectIt end() { 
+            return PGridNewRectIt(pg,bl,tr,tr);
+        }
+    };
+    PGridNewNearbyRange nearbyLoop(VectorND<Float,DIM> pos, Float r){
+        return PGridNewNearbyRange(this, pos, r);
+    }
 };
 #endif

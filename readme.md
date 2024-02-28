@@ -24,10 +24,12 @@ Physics/writeup TODO:
 - [ ] Do the math on magic numbers: what's the relation between `T`, `dt`, `maxh`, and so on such that we don't miss collisions + don't have too many multiple collisions? What are some quick checks that we're getting good data? How do I scale things if I say "I want the same physical scenario, but with double the particles"?
 
 Coding TODO:
-- [ ] Simplify iteration over PGrid and remove all the duplicated looping code.
+- [x] Simplify iteration over PGrid and remove all the duplicated looping code.
+- [ ] Write robust PGrid iterator tests.
+- [ ] Run more tests on PGrid.h to ensure it's written correctly and satisfies the right guarantees.
+- [ ] Add a "bresenham circle" algorithm for image drawing.
 - [ ] Put the magic numbers & image configuration into configuration structs. 
 - [ ] Add command line arguments so that it's easier to run quick tests with 10k particles or slow ones with 1m, verbose or non-verbose output, etc.
-- [ ] Run more tests on PGrid.h to ensure it's written correctly and satisfies the right guarantees.
 - [ ] Add support for a time-dependent boundary condition.
 - [ ] Add timing benchmarks, hopefully we should be linear in N.
 - [ ] Optimization 1: See if I can get rid of newpos,newvel and if that speeds things up.
