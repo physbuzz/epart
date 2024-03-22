@@ -79,10 +79,12 @@ public:
     struct StatsGridStruct { 
         float area;
         int sgw,sgh;
+        int nref;
+        float betaref;
         DoubleImage px,py,n,beta,e,s;
         bool statsAreCurrent;
     } statsgrid;
-    void initializeStatsGrid(int nx, int ny){ 
+    void initializeStatsGrid(int nx, int ny,int nref, float betaref){ 
         statsgrid.sgw=nx;
         statsgrid.sgh=ny;
         statsgrid.px=DoubleImage(nx,ny);
@@ -93,12 +95,40 @@ public:
         statsgrid.s=DoubleImage(nx,ny);
         statsgrid.statsAreCurrent=false;
         statsgrid.area=s.domainSize[0]*s.domainSize[1]/(statsgrid.sgw*statsgrid.sgh);
-        assert(statsgrid.area>0,"statsgrid area less than zero. PGrid not initialized?");
+        statsgrid.nref=nref;
+        statsgrid.betaref=betaref;
+        assert(statsgrid.area>0);//,"statsgrid area less than zero. PGrid not initialized?");
     }
-    void recalculateStatsGrid() { 
+    VectorND<int,2> getStatsGridIndex(VectorND<float,2> pos){
+        VectorND<int,2> ret({int(std::floor(statsgrid.sgw*pos.x[0]/s.domainSize[0])),
+            int(std::floor(statsgrid.sgh*pos.x[1]/s.domainSize[1]))});
+        ret.clampCube(VectorND<int,2>({0,0}),VectorND<int,2>({statsgrid.sgw-1,statsgrid.sgh-1}));
+        return ret;
+    }
+    //fract defined as pos == (getStatsGridIndex(pos)+getStatsGridFract(pos))*s.domainSize/statsgrid.sgwh
+    VectorND<float,2> getStatsGridFract(VectorND<float,2> pos){
+        VectorND<int,2> ind=getStatsGridIndex(pos);
+        VectorND<float,2> ret({statsgrid.sgw*pos[0]/s.domainSize[0]-ind[0],
+            statsgrid.sgh*pos[1]/s.domainSize[1]-ind[1]});
+
+        return ret;
+    }
+    float lerp(float a, float b, float t){ return (b-a)*t+a; }
+    float statsGridInterpDensity(VectorND<float,2> pos) {
+        VectorND<int,2> ind=getStatsGridIndex(pos);
+        VectorND<float,2> fract=getStatsGridFract(pos);
+        float nll=statsgrid.n.get(ind[0],ind[1]);
+        float nlu=statsgrid.n.get(ind[0],std::min(ind[1]+1,statsgrid.sgh-1));
+        float nul=statsgrid.n.get(std::min(ind[0]+1,statsgrid.sgw-1),ind[1]);
+        float nuu=statsgrid.n.get(std::min(ind[0]+1,statsgrid.sgw-1),std::min(ind[1]+1,statsgrid.sgh-1));
+        return lerp(lerp(nll,nul,fract[0]),lerp(nlu,nuu,fract[0]),fract[1]);
+    }
+    void recalculateStatsGrid() {
+
         statsgrid.px.zeroImage();
         statsgrid.py.zeroImage();
         statsgrid.n.zeroImage();
+        statsgrid.e.zeroImage();
 
         stats.totalPx=0;
         stats.totalPy=0;
@@ -110,8 +140,9 @@ public:
         //First, get the totals that we can calculate in the first pass (total momentum, particle number,
         //total energy)
         for(Particle<float,2> &p : *s.plist){
-            int xindx=;
-            int yindx=;
+            VectorND<int,2> ind=getStatsGridIndex(p.pos);
+            int x=ind[0];
+            int y=ind[1];
             statsgrid.n.increase(x,y,1);
             statsgrid.px.increase(x,y,p.vel.x[0]);
             statsgrid.py.increase(x,y,p.vel.x[1]);
@@ -119,19 +150,19 @@ public:
         }
         for(int x=0;x<statsgrid.sgw;x++){
             for(int y=0;y<statsgrid.sgh;y++){
-                float &e=statsgrid.e.at(x,y);
-                float &n=statsgrid.n.at(x,y);
-                float &px=statsgrid.px.at(x,y);
-                float &py=statsgrid.py.at(x,y);
+                auto &e=statsgrid.e.at(x,y);
+                auto &n=statsgrid.n.at(x,y);
+                auto &px=statsgrid.px.at(x,y);
+                auto &py=statsgrid.py.at(x,y);
                 float betadenom=e-0.5*(px*px+py*py)/n; // energy minus energy due to COM motion
                                                        
-                float &beta=statsgrid.beta.at(x,y);
+                auto &beta=statsgrid.beta.at(x,y);
                 if(n<=1 || betadenom<=0){
                     beta=std::numeric_limits<float>::infinity();
                     statsgrid.s.put(x,y,0.0f);
                 } else {
                     beta=n/betadenom;
-                    statsgrid.s.put(x,y,-(n/statsgrid.area)*std::log((n/statsgrid.area)*beta));
+                    statsgrid.s.put(x,y,-(n/statsgrid.area)*std::log((n/statsgrid.area)*beta/(statsgrid.nref*statsgrid.betaref)));
                 }
 
                 stats.totalE+=e;
@@ -139,25 +170,28 @@ public:
                 stats.totalPy+=py;
                 stats.totalN+=n;
 
-                px=px/n;
-                py=py/n;
+                if(n>=1){
+                    px=px/n;
+                    py=py/n;
+                }
                 e=e/statsgrid.area;
                 n=n/statsgrid.area;
 
                 //average density is (sum_i n_i)/N ~= int n(x)^2 d^dx
                 //Think of it differently: each particle in this cell has density n.
                 //There are  n*area particles in this cell. So the total is going to be Sum(n*n*area)/N
-                stats.averageDensity+=n*n*statsgrid.area;
+                stats.averagen+=n*n*statsgrid.area;
                 stats.averageT+=n*statsgrid.area/beta;
-                stats.totalS=statsgrid.s.get(x,y)*statsgrid.area;
+                stats.totalS+=statsgrid.s.get(x,y)*statsgrid.area;
             }
         }
-        stats.averageDensity/=stats.totalN;
+        stats.averagen/=stats.totalN;
         stats.averageT/=stats.totalN;
 
         stats.statsAreCurrent=true;
         statsgrid.statsAreCurrent=true;
     }
+
 
     PGrid<float,2> s;
     float maxH;
@@ -215,6 +249,7 @@ public:
         stats.nZero=0;
         stats.nOne=0;
         stats.nTwoOrMore=0;
+        stats.currentTime+=dt;
 
         for(Particle<float,2> &p : *s.plist){
             p.collision=-1;
@@ -321,20 +356,17 @@ public:
         } 
     }
     void step(int nsteps){
+        for(int i=0;i<nsteps;i++){
+            stepOnce();
+        }
 
     }
 
+    /*
 void initializeMovingWall(float xpos, float velocity) { }
 void findParticleEntropies() { }
 void saveStatsImages(imageparams,prefix,frame,n)
 void saveNewEntropyImage(imageparams,prefix,frame,n)
-float getTime() { }
-float getTotalPx() { }
-float getTotalPy() { }
-float getTotalN() { }
-float getAverageT() { }
-float getTotalS() { }
-float getTotalE() { }
 std::vector<float> getpxntSliceHistogram()
 std::vector<float> getpxntSliceHistogramRowLabels()
 std::vector<float> getpxntSliceHistogramRow1()
@@ -343,7 +375,7 @@ std::vector<float> getpxHistogram(
         VectorND<float,2> tr,
         float histmin,
         float histmax,
-        float binsize) { }
+        float binsize) { }*/
     //Return physical values after sampling particles within rmax of pos.
     //c is the calculated value from radialwc(rmax,p)
     PhysicsQueryStruct querySimulation(VectorND<float,2> pos,float rmax, float p,float c=-1.0f){
@@ -605,25 +637,26 @@ void movingWallTest(int nparticles, std::string prefix,
     int imgh=480, 
     bool verbose=true) {
 
-    float temperature=1;
+    float temperature=0.5f;
     //Packing fraction. This has to be small!
     float eta=0.06;
+    float L=2.0f;
 
-    vec2 simulationVolume=vec2({2.0f,1.0f});
+    VectorND<float,2> simulationVolume=VectorND<float,2>({L,L});
 
     //imgw,imgh,cx,cy,realsize
     ImageParams imageparams={imgw,imgh,simulationVolume[0]/2,simulationVolume[1]/2,simulationVolume[0]};
 
     //particle radius and timestep
-    float r,dt,maxH;
+    float radius,dt,maxH;
     int nframes,frameskip;
 
     nframes=int(std::ceil(totalTime/timePerFrame));
     //Satisfy packing fraction constraint (N*pi*r**2 / area == eta)
-    r=std::sqrt(eta/(nparticles*M_PI));
+    radius=std::sqrt(eta/(nparticles*M_PI));
 
     //Find the grid cell size for the PGrid data structure.
-    maxH=CollisionSimulator::findMaxH(r);
+    maxH=CollisionSimulator::findMaxH(radius);
 
     //dt recommended to keep a small number of collisions per timestep.
     float dt1=CollisionSimulator::findDt(temperature,maxH);
@@ -644,30 +677,64 @@ void movingWallTest(int nparticles, std::string prefix,
         //dt2 == dt*frameskip, and dt<=dt1
     }
 
-    ParticleList<float,2> plist();
-    plist.placeVolume(vec2({0.0f,0.0f}),vec2({1.0f,1.0f}),nparticles,temperature);
 
-    Simulator s(simulationVolume,maxH);
-    s.ingestParticles(plist);
+    ParticleList<float,2> pl;
+
+
+    //This really should be its own method, but usage of PGrid is awkward here.
+    //plist.placeVolume(VectorND<float,2>({0.0f,0.0f}),VectorND<float,2>({1.0f,1.0f}),nparticles,temperature);
+    //Simulator s(simulationVolume,maxH);
+    //s.ingestParticles(plist);
+    for(int i=0;i<nparticles;i++) {
+        float vmag=std::sqrt(2*temperature);
+        float theta=(rand()*2.0f*M_PI)/RAND_MAX;
+        VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
+        VectorND<float,2> vnew({vmag*std::cos(theta),vmag*std::sin(theta)});
+        pl.plist.push_back(Particle<float,2>{pnew,vnew,pnew,vnew,-1});
+    }
+    CollisionSimulator cl(pl,simulationVolume,maxH,radius,dt);
+    PGrid<float,2> &s=cl.s;
+    s.rebuildGrid();
+    for(int passes=0;passes<5;passes++){
+        for(Particle<float,2> *p1 : s.updateLoop()){
+            bool collisionFree=true;
+            for(Particle<float,2> *p2 : s.nearbyLoop(p1->pos,2*radius)){
+                if(p1==p2)
+                    continue;
+                if((p1->pos-p2->pos).length2()<4*radius*radius){
+                    collisionFree=false;
+                    break;
+                }
+            }
+            if(!collisionFree){
+                VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
+                p1->pos=pnew;
+                p1->posnew=pnew;
+            }
+        }
+    }
 
     //s::initializeMovingWall(float xpos, float v);
-    s.initializeMovingWall(1.0f,wallVelocity);
+    //s.initializeMovingWall(1.0f,wallVelocity);
 
     //StatisticsGrid finds n,beta,px,py by dividing space into a grid.
-    s.initializeStatisticsGrid(imgw/2,imgw/4);
-    s.recalculateStatisticsGrid();
-    s.findParticleEntropies(); //update internal "entropy per particle" calculation
+    cl.initializeStatsGrid(imgw/20,imgw/40, nparticles,1.0f);
+    cl.recalculateStatsGrid();
+    //s.findParticleEntropies(); //update internal "entropy per particle" calculation
 
     //CSV of other stuff (energy, total entropy, etc.)
     CSVData simData("sim_data.csv");
     simData.newColumn("time");
     simData.newColumn("Px");
     simData.newColumn("Py");
+    simData.newColumn("averagen");
     simData.newColumn("N");
     simData.newColumn("N_true");
     simData.newColumn("T");
     simData.newColumn("S");
     simData.newColumn("E");
+
+    /*
     //Histograms of parameters with y integrated out. px,py,n,t.
     CSVData pxntSliceHistogram("pxnt_slice_hist.csv");
     //Particle data in the center of the screen
@@ -676,40 +743,98 @@ void movingWallTest(int nparticles, std::string prefix,
     float pxHistogramMax=-3;
     float pxHistogramBinSize=0.05;
     float pxHistogramSize=0.2;
+    */
 
+    std::cout<<"Rendering "<<nframes<<" frames with "<<frameskip<<" substeps per frame."<<std::endl;
 
     for(int frame=0;frame<nframes;frame++){
-        s.step(dt,frameskip);
+        cl.step(frameskip);
         
-        s.recalculateStatisticsGrid();
-        s.findParticleEntropies();
+        cl.recalculateStatsGrid();
+        //s.findParticleEntropies();
 
         //Plots of px,py,n,T,s
-        s.saveStatsImages(imageparams,prefix,frame,4);
+        //s.saveStatsImages(imageparams,prefix,frame,4);
 
         //Plots of the entropy generated
-        s.saveEntropyGeneratedImage(imageparams,prefix,frame,4);
+        //s.saveEntropyGeneratedImage(imageparams,prefix,frame,4);
 
         //Save simulation parameters like total energy, 
-        simData.newRow(s.getTime(),s.getTotalPx(),s.getTotalPy(),s.getTotalN(),nparticles,s.getAverageT(),s.getTotalS(), s.getTotalE());
+        //simData.newRow(s.getTime(),s.getTotalPx(),s.getTotalPy(),s.getTotalN(),nparticles,s.getAverageT(),s.getTotalS(), s.getTotalE());
+        simData.newRow();
+        simData.newColumn(cl.stats.currentTime);
+        simData.newColumn(cl.stats.totalPx);
+        simData.newColumn(cl.stats.totalPy);
+        simData.newColumn(cl.stats.averagen);
+        simData.newColumn(cl.stats.totalN);
+        simData.newColumn(nparticles);
+        simData.newColumn(cl.stats.averageT);
+        simData.newColumn(cl.stats.totalS);
+        simData.newColumn(cl.stats.totalE);
         simData.save();
 
         //Save momentum histogram
-        pxntSliceHistogram.newRow(s.getpxntSliceHistogram());
-        pxntSliceHistogram.save();
+        //pxntSliceHistogram.newRow(s.getpxntSliceHistogram());
+        //pxntSliceHistogram.save();
 
         //Save momentum histogram
+        /*
         pxCenterHistogram.newRow(s.getpxHistogram(
-                    vec2({simulationVolume[0]/2-pxHistogramSize/2,simulationVolume[1]/2-pxHistogramSize/2}),
-                    vec2({simulationVolume[0]/2+pxHistogramSize/2,simulationVolume[1]/2+pxHistogramSize/2}),
+                    VectorND<float,2>({simulationVolume[0]/2-pxHistogramSize/2,simulationVolume[1]/2-pxHistogramSize/2}),
+                    VectorND<float,2>({simulationVolume[0]/2+pxHistogramSize/2,simulationVolume[1]/2+pxHistogramSize/2}),
                     pxHistogramMin,
                     pxHistogramMax,
                     pxHistogramBinSize));
         pxCenterHistogram.save();
+        */
     }
 }
 
+
+
+    /*
+void placeVolumeInPlist(ParticleList<float,2> &plist, VectorND<float,2> bl, VectorND<float,2> tr,
+        float radius,int nparticles, float temperature){
+
+    for(int i=0;i<nparticles;i++){
+        float vmag=std::sqrt(2*temperature);
+        float theta=(rand()*2.0f*M_PI)/RAND_MAX;
+        VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
+        VectorND<float,2> vnew({vmag*std::cos(theta),vmag*std::sin(theta)});
+        plist.push_back(Particle<float,2>{pnew,vnew,pnew,vnew,-1});
+    }
+
+    VectorND<float,2> diff=tr-bl;
+
+    PGrid<float,2> pg
+
+    PGrid(std::vector<Particle<Float,DIM> > *plist,VectorND<Float,DIM> domainSize,Float maxH) : 
+    CollisionSimulator cl(pl,domainSize,maxH);
+    PGrid<float,2> &s=cl.s;
+    s.rebuildGrid();
+    for(int passes=0;passes<5;passes++){
+        for(Particle<float,2> *p1 : s.updateLoop()){
+            bool collisionFree=true;
+            for(Particle<float,2> *p2 : s.nearbyLoop(p1->pos,2*radius)){
+                if(p1==p2)
+                    continue;
+                if((p1->pos-p2->pos).length2()<4*radius*radius){
+                    collisionFree=false;
+                    break;
+                }
+            }
+            if(!collisionFree){
+                VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
+                p1->pos=pnew;
+                p1->posnew=pnew;
+            }
+        }
+    }
+}*/
 int main() {
+
+    movingWallTest(100000,"test",0.0f,1.0f);
+    /*
     float temperature=1.0f;
     float L=2.0f;
     //Expected velocities are sqrt(2T/m)
@@ -787,6 +912,7 @@ int main() {
             //cl.saveImage(radius,{640,480,0.05f,1.0f,1.0f},"lg",(i/frameskip),5);
         }
     }
+*/
     return 0;
 }
 

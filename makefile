@@ -13,6 +13,9 @@ runfast: epart-fast
 epart-fast: epart.cpp PGrid.h VectorND.h phystructs.h ParticleList.h ImageUtil.h
 	$(CPP) -O3 epart.cpp -o epart-fast
 
+clean: 
+	rm epart
+
 #circlepack: circlepack.cpp PGrid.h VectorND.h phystructs.h ParticleList.h
 #	$(CPP) -g circlepack.cpp -o circlepack
 #

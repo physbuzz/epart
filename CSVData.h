@@ -12,17 +12,19 @@ class CSVData {
     bool firstRow;
 public: 
     CSVData(std::string filename) : data(), fname(filename), firstCol(true),firstRow(true) { }
-    void newColumn(std::string name) { 
+    template <typename T> void newColumn(T arg) { 
         if(firstCol) {
-            data<<name;
+            data<<arg;
             firstCol=false;
         } else {
-            data<<", "<<name;
+            data<<", "<<arg;
         }
     }
     void newRow() {
-        if(!firstRow)
+        if(!firstCol || !firstRow){
             data<<"\n";
+            firstRow=false;
+        }
         firstCol=true;
     }
     template <typename T> void newRow(std::vector<T> arg) { 
@@ -50,7 +52,7 @@ public:
     }*/
     void save() { 
         std::ofstream output(fname.c_str());
-        output<<data.rdbuf();
+        output<<data.str().c_str();
         output.close();
     }
 };

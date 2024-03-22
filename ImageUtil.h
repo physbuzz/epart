@@ -83,6 +83,7 @@ public:
 	void increase(int x,int y,double c);
     void zeroImage();
 	double get(int x,int y);
+	double &at(int x,int y);
 	double getMax();
 	double getMin();
 	void unitStretch(); //scale and translate so that the lowest value is 0 and the highest is 1.
@@ -292,6 +293,11 @@ void DoubleImage::put(int x,int y,double c) {
 
 inline
 double DoubleImage::get(int x,int y) {
+	return data[y*width+x];
+}
+
+inline
+double &DoubleImage::at(int x,int y) {
 	return data[y*width+x];
 }
 
