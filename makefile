@@ -7,6 +7,9 @@ epart: epart.cpp PGrid.h VectorND.h phystructs.h ParticleList.h ImageUtil.h
 run: epart
 	./epart
 
+runfast: epart-fast
+	./epart-fast
+
 epart-fast: epart.cpp PGrid.h VectorND.h phystructs.h ParticleList.h ImageUtil.h
 	$(CPP) -O3 epart.cpp -o epart-fast
 

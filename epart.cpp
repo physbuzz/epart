@@ -5,8 +5,9 @@
 #include "VectorND.h"
 #include "phystructs.h"
 #include "ParticleList.h"
-#include "PGridnew.h"
+#include "PGrid.h"
 #include "ImageUtil.h"
+#include "easytime.h"
 
 #define EPS2 0.0000001
 
@@ -57,14 +58,13 @@ public:
 
         float totalS;
         float totalE;
-    };
+    } stats;
 
     struct PhysicsQueryStruct {
         float s, n, px, py, beta, e;
     };
 
-    CollisionStats stats;
-    PGridNew<float,2> s;
+    PGrid<float,2> s;
     float maxH;
 
     CollisionSimulator(ParticleList<float,2> &pl, VectorND<float,2> domainSize, float maxH) :
@@ -89,66 +89,68 @@ public:
 
         //TODO: make this generic
         for(Particle<float,2> *p1 : s.updateLoop()){
-            for(Particle<float,2> *p2 : s.nearbyLoop(p1->pos,maxH)){
-                assert(p2!=nullptr);
-                if(p1==p2 || p2->collision==0)
-                    continue;
-                auto x1=p1->pos;
-                auto x2=p2->pos;
-                auto v1=p1->vel;
-                auto v2=p2->vel;
-                auto dx=x2-x1;
-                auto dv=v2-v1;
-                float inner=dx.dot(dv);
-                if(inner>=0)
-                    continue;
-                float dv2=dv.length2();
-                float d=inner*inner-dv2*(dx.length2()-4.0f*radius2);
-                if(d<=0)
-                    continue;
-                float t1=(-inner-sqrt(d))/dv2;
-                if(t1<EPS2 || t1>dt)
-                    continue;
-                //If we get to this point, there's a collision within time dt.
-                //If the other particle has already undergone a collision, also ignore
-                //but set a flag for it.
-                //
-                //Basically, we only ever handle collisions for two pairs of particles
-                //with their collision flags set to -1.
-                if(p2->collision>0){
-                    //This is not a perfect count of the number of double collisions. 
-                    //Need to double check that it has some bearing to ground truth!
-                    stats.nTwoOrMore+=1;
-                    stats.nOne-=1;
-                    continue;
+            if(p1->collision<0) {
+                for(Particle<float,2> *p2 : s.nearbyLoop(p1->pos,maxH)){
+                    assert(p2!=nullptr);
+                    if(p1==p2 || p2->collision==0)
+                        continue;
+                    auto x1=p1->pos;
+                    auto x2=p2->pos;
+                    auto v1=p1->vel;
+                    auto v2=p2->vel;
+                    auto dx=x2-x1;
+                    auto dv=v2-v1;
+                    float inner=dx.dot(dv);
+                    if(inner>=0)
+                        continue;
+                    float dv2=dv.length2();
+                    float d=inner*inner-dv2*(dx.length2()-4.0f*radius2);
+                    if(d<=0)
+                        continue;
+                    float t1=(-inner-sqrt(d))/dv2;
+                    if(t1<EPS2 || t1>dt)
+                        continue;
+                    //If we get to this point, there's a collision within time dt.
+                    //If the other particle has already undergone a collision, also ignore
+                    //but set a flag for it.
+                    //
+                    //Basically, we only ever handle collisions for two pairs of particles
+                    //with their collision flags set to -1.
+                    if(p2->collision>0){
+                        //This is not a perfect count of the number of double collisions. 
+                        //Need to double check that it has some bearing to ground truth!
+                        stats.nTwoOrMore+=1;
+                        stats.nOne-=1;
+                        continue;
+                    }
+
+                    float t2=dt-t1;
+                    p1->collision=1;
+                    p2->collision=1;
+                    stats.nOne+=2;
+
+                    p1->posnew=p1->pos+p1->vel*t1;
+                    p2->posnew=p2->pos+p2->vel*t1;
+                    //Collision of equal masses; we reverse each relative velocity along the direction
+                    //of their collision vector.
+                    //
+                    //Start with velocity v1. Put it in CM frame:
+                    //v1_CM=v1-(v1+v2)/2
+                    //reverse it along the rhat direction:
+                    //v1_CM -> v1_CM-2*rhat(rhat.dot(v1_CM))
+                    //add (v1+v2)/2 to put it back in non-CM and simplify:
+                    //v1_new = v1+2*rhat*rhat.dot((v2-v1)/2)
+                    //       = v1+rhat*rhat.dot(v2-v1)
+                    //cout<<(p2->posnew-p1->posnew).length()<<endl;
+                    auto dx2=(p2->posnew-p1->posnew).normalized();
+                    p1->velnew=p1->vel+dx2*dx2.dot(dv);
+                    p2->velnew=p2->vel-dx2*dx2.dot(dv);
+
+                    //time evolve the rest of the way.
+                    p1->posnew+=p1->velnew*t2;
+                    p2->posnew+=p2->velnew*t2;
+                    break;
                 }
-
-                float t2=dt-t1;
-                p1->collision=1;
-                p2->collision=1;
-                stats.nOne+=2;
-
-                p1->posnew=p1->pos+p1->vel*t1;
-                p2->posnew=p2->pos+p2->vel*t1;
-                //Collision of equal masses; we reverse each relative velocity along the direction
-                //of their collision vector.
-                //
-                //Start with velocity v1. Put it in CM frame:
-                //v1_CM=v1-(v1+v2)/2
-                //reverse it along the rhat direction:
-                //v1_CM -> v1_CM-2*rhat(rhat.dot(v1_CM))
-                //add (v1+v2)/2 to put it back in non-CM and simplify:
-                //v1_new = v1+2*rhat*rhat.dot((v2-v1)/2)
-                //       = v1+rhat*rhat.dot(v2-v1)
-                //cout<<(p2->posnew-p1->posnew).length()<<endl;
-                auto dx2=(p2->posnew-p1->posnew).normalized();
-                p1->velnew=p1->vel+dx2*dx2.dot(dv);
-                p2->velnew=p2->vel-dx2*dx2.dot(dv);
-
-                //time evolve the rest of the way.
-                p1->posnew+=p1->velnew*t2;
-                p2->posnew+=p2->velnew*t2;
-                break;
             }
 
             if(p1->collision<0){
@@ -176,7 +178,7 @@ public:
                 p1->pos.x[1]=2*s.domainSize[1]-p1->pos.x[1];
             }
             /* It's still possible to wind up with p1->pos outside the boundaries
-             * after these checks, but the PGridNew updater will clamp the position to the
+             * after these checks, but the PGrid updater will clamp the position to the
              * boundaries
              * */
         } 
@@ -304,10 +306,13 @@ public:
 
 
         float nref2=(1.0f*s.plist->size())/s.domainSize.product();
-        float z11=100000.0f;
+        float z11=10000.0f;
         float sref=nref2*(2.0f-std::log(nref2*1.0f/z11));
-        float srefmax=sref*1.5f;
-        float srefmin=sref/2.0f;
+        //float srefmax=sref*1.5f;
+        //float srefmin=sref/2.0f;
+        float srefmax=410000.0f/4.0f;
+        float srefmin=340000.0f/32.0f;;
+        //cout<<srefmin<<" : "<<srefmax<<endl;
         
         float totaln=0.0f;
         float totale=0.0f;
@@ -363,7 +368,7 @@ public:
         }
         //auto q=querySimulation(s,VectorND<float,2>({0.5f,0.5f}),radiusPrime,p,cc);
         //cout<<"Entropy density at some pos: "<<q.s<<endl;
-        cout<<timevalue<<", "<<totals<<", "<<totaln<<", "<<totale<<endl;
+        cout<<timevalue<<", "<<totals<<", "<<totaln<<", "<<totale<<", ";
         imgDensity.save(getFilename(prefix+"density",fnamei,padcount,".bmp"));
         imgpx.save(getFilename(prefix+"px",fnamei,padcount,".bmp"));
         imgpy.save(getFilename(prefix+"py",fnamei,padcount,".bmp"));
@@ -431,117 +436,64 @@ public:
 
 int main() {
     float temperature=1.0f;
+    float L=2.0f;
     //Expected velocities are sqrt(2T/m)
     //time to cross a boundary ~= dx/sqrt(2T/m)
-    int nparticles=1000000;
+    int nparticles=100000;
 
+    float eta=0.03; //target packing fraction. has to be small!
 
+    float radius=L*std::sqrt(eta/(M_PI*nparticles));
 
-    float radius=0.0002f;
-    float L=2.0f;
     VectorND<float,2> domainSize({2.0f*L,L});
-    float maxH=0.001f;
+
+    float maxH=5*radius;
     float dt=maxH/(6.0f*std::sqrt(2.0f*temperature));
     float timeelapsed=0.0f;
-    
 
     ParticleList<float,2> pl;
-    
-    const int maxtries=500;
+
     for(int i=0;i<nparticles;i++){
         float vmag=std::sqrt(2*temperature);
         float theta=(rand()*2.0f*M_PI)/RAND_MAX;
-
         VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
         VectorND<float,2> vnew({vmag*std::cos(theta),vmag*std::sin(theta)});
         pl.plist.push_back(Particle<float,2>{pnew,vnew,pnew,vnew,-1});
     }
     CollisionSimulator cl(pl,domainSize,maxH);
-    PGridNew<float,2> &s=cl.s;
+    PGrid<float,2> &s=cl.s;
     s.rebuildGrid();
     for(int passes=0;passes<5;passes++){
         for(Particle<float,2> *p1 : s.updateLoop()){
-            int aind=s.getParticleIndex(*p1);
-            VectorND<int,2> avec=s.indexToIntvector(aind);
-            bool collisionfree=true;
-            //loop over all adjacent cells
-            for(int dx=-1;dx<=1 && collisionfree;dx++){
-                for(int dy=-1;dy<=1 && collisionfree;dy++){
-                    //ignore cells that are out of bounds
-                    if(avec[0]+dx<0
-                            ||avec[0]+dx>=s.numCells[0]
-                            ||avec[1]+dy<0
-                            ||avec[1]+dy>=s.numCells[1])
-                        continue;
-                    //loop over the particles in the adjacent cells
-                    int bind=s.intvectorToIndex(s.indexToIntvector(aind)+VectorND<int,2>({dx,dy}));
-                    for(size_t p2ind=0;p2ind<s.idarr[bind].size();p2ind++){
-                        Particle<float,2> *p2=&((*s.plist)[s.idarr[bind][p2ind]]);
-                        if(p1==p2)
-                            continue;
-                        if((p1->pos-p2->pos).length2()<4*radius*radius){
-                            collisionfree=false;
-                            break;
-                        }
-                    }
+            bool collisionFree=true;
+            for(Particle<float,2> *p2 : s.nearbyLoop(p1->pos,2*radius)){
+                if(p1==p2)
+                    continue;
+                if((p1->pos-p2->pos).length2()<4*radius*radius){
+                    collisionFree=false;
+                    break;
                 }
             }
-            VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
-            p1->pos=pnew;
-            p1->posnew=pnew;
+            if(!collisionFree){
+                VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
+                p1->pos=pnew;
+                p1->posnew=pnew;
+            }
         }
     }
-    /*
-            VectorND<float,2> pnew({(rand()*L)/RAND_MAX,(rand()*L)/RAND_MAX});
-    VectorND<float,2> pos1({1.0f-0.1,1.0f});
-    VectorND<float,2> vel1({1.0f,0.0f});
-    VectorND<float,2> pos2({1.0f+0.1,1.0f});
-    VectorND<float,2> vel2({-1.0f,0.0f});
-    pl.plist.push_back(Particle<float,2>{pos1,vel1,pos1,vel1,-1});
-    pl.plist.push_back(Particle<float,2>{pos2,vel2,pos2,vel2,-1});*/
 
-
-
-    /*
-    int nframes=50;
-    int frameskip=40;
-    ImageParams ip{};
-    ip.imgw=640;
-    ip.imgh=480;
-    ip.realsize=4.0f;
-    ip.cx=2.0f;
-    ip.cy=1.0f;
-    for(int i=0;i<=nframes*frameskip;i++){
-        cl.updateOnce(radius,dt);
-        timeelapsed+=dt;
-        if(i%frameskip==0){
-            float e=0;
-            for(int j=0;j<s.plist->size();j++){
-                e+=0.5*s.plist->at(j).vel.length2();
-            }
-            //cout<<"On step "<<i<<". Energy is: "<<e<<endl;
-            //saveImage(s,pl,radius,{640,480,0.05f,2.0f,1.0f},"first",(i/frameskip),5);
-            //saveDensityImage(s,pl,0.04f,0.05f,ip,"density",(i/frameskip),5);
-            //saveDensityImage(s,pl,0.015,1.0f,ip,"density",(i/frameskip),5);
-            float pp=0.05f;
-            float rr=0.04f;
-            cl.saveDensityImages(rr,pp,ip,"run_",(i/frameskip),5,timeelapsed);
-            //auto q=querySimulation(s,VectorND<float,2>({0.5f,0.5f}),rr,pp,radialwc(rr,pp));
-            //cout<<q.n<<endl;
-        }
-        if((i/frameskip)%500==0){
-            pl.save("particlecheckpoint.txt");
-        }
-    }*/
-    cout<<"Done with initialization, doing the real loop:"<<endl;
-    int nframes=5;
-    int frameskip=1;
+    //cout<<"Done with initialization, doing the real loop:"<<endl;
+    
+    cout<<"time, entropy, total n, total e, seconds used for simulation, seconds used for drawing, total e (exact)"<<endl;
+    int nframes=5000;
+    int frameskip=400;
     ImageParams ip{};
     ip.imgw=640;
     ip.imgh=480;
     ip.realsize=4.00f;
     ip.cx=2.0f;
     ip.cy=1.0f;
+    EasyTimer timer;
     for(int i=0;i<=nframes*frameskip;i++){
         //cout<<"Frame "<<i<<endl;
         cl.updateOnce(radius,dt);
@@ -551,28 +503,15 @@ int main() {
             for(int j=0;j<s.plist->size();j++){
                 e+=0.5*s.plist->at(j).vel.length2();
             }
-            //cl.saveImage(radius,{640,480,0.05f,1.0f,1.0f},"lg",(i/frameskip),5);
 
             float pp=0.05f;
-            float rr=0.04f;
+            float rr=0.08f;
+            double sim_elapsed=timer.tick();
             cl.saveDensityImages(rr,pp,ip,"run_",(i/frameskip),5,timeelapsed);
+            cout<<sim_elapsed<<", "<<timer.tick()<<", "<<e<<endl;
+            //cl.saveImage(radius,{640,480,0.05f,1.0f,1.0f},"lg",(i/frameskip),5);
         }
     }
-
-
-    /*
-    
-    float ratio=0;
-    int nframes=600;
-    int frameskip=10;
-    for(int i=0;i<=nframes*frameskip;i++){
-        ratio+=updateOnce(s,fract*radius,0.1*radius);
-        if(i%frameskip==0){
-            cout<<"On step "<<i<<endl;
-            saveImage(s,pl,radius,fract,(i/frameskip));
-        }
-    }
-    cout<<"Acceptance ratio: "<<(ratio/(frameskip*nframes))<<endl;*/
     return 0;
 }
 

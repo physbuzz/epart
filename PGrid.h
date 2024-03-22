@@ -1,5 +1,5 @@
-#ifndef PGRIDNEW_H
-#define PGRIDNEW_H
+#ifndef PGRID_H
+#define PGRID_H
 #include <utility>
 #include <cstdlib>
 #include <cassert>
@@ -7,9 +7,9 @@
 #include "phystructs.h"
 
 template<typename Float,int DIM>
-class PGridNew {
+class PGrid {
 public:
-    static_assert(0<DIM,"PGridNew DIM must be positive.");
+    static_assert(0<DIM,"PGrid DIM must be positive.");
 
     std::vector<std::vector<size_t> > idarr;
 
@@ -61,13 +61,13 @@ public:
     }
     std::vector<Particle<Float,DIM> > *plist;
 
-    PGridNew &operator=(const PGridNew&) = delete;
-    PGridNew(const PGridNew&) = delete;
-    PGridNew() : plist(nullptr) { }
-    PGridNew(std::vector<Particle<Float,DIM> > *plist) : idarr(), numCells(), boxWidth(), domainSize(), 
+    PGrid &operator=(const PGrid&) = delete;
+    PGrid(const PGrid&) = delete;
+    PGrid() : plist(nullptr) { }
+    PGrid(std::vector<Particle<Float,DIM> > *plist) : idarr(), numCells(), boxWidth(), domainSize(), 
         needsRebuild(true), productOfSizes(1), plist(nullptr) { }
 
-    PGridNew(std::vector<Particle<Float,DIM> > *plist,VectorND<Float,DIM> domainSize,Float maxH) : 
+    PGrid(std::vector<Particle<Float,DIM> > *plist,VectorND<Float,DIM> domainSize,Float maxH) : 
         idarr(), numCells(), boxWidth(), domainSize(), 
         needsRebuild(true), productOfSizes(0), 
         plist(plist) {
@@ -129,8 +129,8 @@ public:
     //Do this after the iterators!
     //void timestepGrid(Float dt); 
     /*
-    class PGridNewPairIt {
-        PGridNew<Float,DIM> *pg;
+    class PGridPairIt {
+        PGrid<Float,DIM> *pg;
         VectorND<int,DIM> a;
         size_t i;
         VectorND<int,DIM> da;
@@ -239,7 +239,7 @@ public:
         public:
         Particle<Float,DIM> *first;
         Particle<Float,DIM> *second;
-        explicit PGridNewPairIt(PGridNew<Float,DIM> *pg,size_t aind=0) : 
+        explicit PGridPairIt(PGrid<Float,DIM> *pg,size_t aind=0) : 
             pg(pg), a(), i(0), da(), j(1), aind(aind), bind(aind), first(nullptr),second(nullptr) { 
             a=pg->indexToIntvector(aind);
             while(!isEmpty()&&!isValid()){
@@ -253,44 +253,44 @@ public:
         bool isEmpty(){
             return aind>=pg->productOfSizes;
         }
-        PGridNewPairIt& operator++() {
+        PGridPairIt& operator++() {
             pop_front();
             return *this;
         }
         std::pair<Particle<Float,DIM>*,Particle<Float,DIM>*> operator*() const {
             return std::make_pair(first,second);
         }
-        bool operator==(const PGridNewPairIt &other){
+        bool operator==(const PGridPairIt &other){
             assert(pg==other.pg);
             return (aind>=pg->idarr.size() && other.aind>=pg->idarr.size())||(
                     aind==other.aind&&bind==other.bind&&i==other.i&&j==other.j);
         }
-        bool operator!=(const PGridNewPairIt &other){
+        bool operator!=(const PGridPairIt &other){
             return !(operator==(other));
         }
     };
 
-    class PGridNewPairRange{
-        PGridNew<Float,DIM> *pg;
+    class PGridPairRange{
+        PGrid<Float,DIM> *pg;
         public:
-        PGridNewPairRange(PGridNew<Float,DIM> *pg) : pg(pg){ }
+        PGridPairRange(PGrid<Float,DIM> *pg) : pg(pg){ }
 
-        PGridNewPairIt begin() { 
-            return PGridNewPairIt(pg,0);
+        PGridPairIt begin() { 
+            return PGridPairIt(pg,0);
         }
-        PGridNewPairIt end() { 
-            return PGridNewPairIt(pg,pg->plist->size());
+        PGridPairIt end() { 
+            return PGridPairIt(pg,pg->plist->size());
         }
     }; 
 
-    PGridNewPairRange pairs(){
-        return PGridNewPairRange(this);
+    PGridPairRange pairs(){
+        return PGridPairRange(this);
     }
     
     */
 
-    class PGridNewUpdateIt {
-        PGridNew<Float,DIM> *pg;
+    class PGridUpdateIt {
+        PGrid<Float,DIM> *pg;
         size_t pind; // index into pg->plist
         size_t aind; // index into pg->idarr
         void updateAIndex(){
@@ -304,11 +304,11 @@ public:
         }
     public:
         Particle<Float,DIM> *part;
-        PGridNewUpdateIt(PGridNew<Float,DIM> *pg,size_t pind) : pg(pg),pind(pind),aind(0),part(nullptr) { 
+        PGridUpdateIt(PGrid<Float,DIM> *pg,size_t pind) : pg(pg),pind(pind),aind(0),part(nullptr) { 
             updateAIndex();
         }
 
-        PGridNewUpdateIt& operator++() {
+        PGridUpdateIt& operator++() {
             (*pg->plist)[pind].pos.clampCube(VectorND<Float,DIM>(),pg->domainSize);
             size_t aind_new=pg->getParticleIndex((*pg->plist)[pind]);
             if(aind!=aind_new){
@@ -321,32 +321,32 @@ public:
         Particle<Float,DIM>* operator*() const {
             return part;
         }
-        bool operator!=(const PGridNewUpdateIt &other) const {
+        bool operator!=(const PGridUpdateIt &other) const {
             assert(pg==other.pg);
             return (pind!=other.pind);
         }
     };
-    class PGridNewUpdateRange {
-        PGridNew<Float,DIM> *pg;
+    class PGridUpdateRange {
+        PGrid<Float,DIM> *pg;
     public:
-        PGridNewUpdateRange(PGridNew<Float,DIM> *pg) : pg(pg){ }
+        PGridUpdateRange(PGrid<Float,DIM> *pg) : pg(pg){ }
 
-        PGridNewUpdateIt begin() { 
-            return PGridNewUpdateIt(pg,0);
+        PGridUpdateIt begin() { 
+            return PGridUpdateIt(pg,0);
         }
-        PGridNewUpdateIt end() { 
-            return PGridNewUpdateIt(pg,pg->plist->size());
+        PGridUpdateIt end() { 
+            return PGridUpdateIt(pg,pg->plist->size());
         }
     };
-    PGridNewUpdateRange updateLoop(){
-        return PGridNewUpdateRange(this);
+    PGridUpdateRange updateLoop(){
+        return PGridUpdateRange(this);
     }
 
 
 
 
-    class PGridNewRectIt {
-        PGridNew<Float,DIM> *pg;
+    class PGridRectIt {
+        PGrid<Float,DIM> *pg;
 
         //Lowest coordinate in the search rectangle (inclusive)
         VectorND<int,DIM> bl;
@@ -414,7 +414,7 @@ public:
 
         Particle<Float,DIM> *partptr;
 
-        explicit PGridNewRectIt(PGridNew<Float,DIM> *pg,VectorND<int,DIM> bl,VectorND<int,DIM> tr) : 
+        explicit PGridRectIt(PGrid<Float,DIM> *pg,VectorND<int,DIM> bl,VectorND<int,DIM> tr) : 
             pg(pg), bl(bl),tr(tr), loc(bl), aind(0),pind(0), partptr(nullptr){ 
 
             for(int k=0;k<DIM;k++){
@@ -430,8 +430,8 @@ public:
             else
                 pop_front();
         }
-        //Used to construct the end iterator with PGridNewRectIt(pg,bl,tr,tr);
-        explicit PGridNewRectIt(PGridNew<Float,DIM> *pg,VectorND<int,DIM> bl,VectorND<int,DIM> tr, VectorND<int,DIM> loc) : 
+        //Used to construct the end iterator with PGridRectIt(pg,bl,tr,tr);
+        explicit PGridRectIt(PGrid<Float,DIM> *pg,VectorND<int,DIM> bl,VectorND<int,DIM> tr, VectorND<int,DIM> loc) : 
             pg(pg), bl(bl),tr(tr), loc(loc), aind(0),pind(0), partptr(nullptr){ 
 
             for(int k=0;k<DIM;k++){
@@ -441,25 +441,25 @@ public:
             aind=pg->intvectorToIndex(loc);
             pop_front();
         }
-        PGridNewRectIt& operator++() {
+        PGridRectIt& operator++() {
             pop_front();
             return *this;
         }
         Particle<Float,DIM>* operator*() const {
             return partptr;
         }
-        bool operator!=(const PGridNewRectIt &other){
+        bool operator!=(const PGridRectIt &other){
             return !(this->isEmpty());
         }
     };
-    class PGridNewNearbyRange {
-        PGridNew<Float,DIM> *pg;
+    class PGridNearbyRange {
+        PGrid<Float,DIM> *pg;
         VectorND<Float,DIM> pos;
         Float r;
         VectorND<int,DIM> bl;
         VectorND<int,DIM> tr;
     public:
-        PGridNewNearbyRange(PGridNew<Float,DIM> *pg, VectorND<Float,DIM> pos, Float r) : 
+        PGridNearbyRange(PGrid<Float,DIM> *pg, VectorND<Float,DIM> pos, Float r) : 
             pg(pg), pos(pos), r(r),bl(),tr(){ 
 
             VectorND<Float,DIM> blcoord;
@@ -484,15 +484,15 @@ public:
             if(empty)
                 bl=tr;
         }
-        PGridNewRectIt begin() { 
-            return PGridNewRectIt(pg,bl,tr);
+        PGridRectIt begin() { 
+            return PGridRectIt(pg,bl,tr);
         }
-        PGridNewRectIt end() { 
-            return PGridNewRectIt(pg,bl,tr,tr);
+        PGridRectIt end() { 
+            return PGridRectIt(pg,bl,tr,tr);
         }
     };
-    PGridNewNearbyRange nearbyLoop(VectorND<Float,DIM> pos, Float r){
-        return PGridNewNearbyRange(this, pos, r);
+    PGridNearbyRange nearbyLoop(VectorND<Float,DIM> pos, Float r){
+        return PGridNearbyRange(this, pos, r);
     }
 };
 #endif
