@@ -30,6 +30,7 @@ an md simulation. So here's a TODO list for some hacked together code to do that
 - [ ] Write DoubleImage at() command.
 - [ ] Add interpolation functions to StatsGrid for ease of use
 - [ ] Add entropy per particle calculation and add entropy to phystructs
+- [ ] Add the entropy change image generation
 - [ ] Update StatsPlots to use StatsGrid data
 - [ ] Update DoubleImage to accept floats
 - [ ] Add optional movableWall initialization and movement code
