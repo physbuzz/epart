@@ -81,11 +81,13 @@ public:
 	const std::vector<double> getData();
 	void put(int x,int y,double c);
 	void increase(int x,int y,double c);
+    void zeroImage();
 	double get(int x,int y);
 	double getMax();
 	double getMin();
 	void unitStretch(); //scale and translate so that the lowest value is 0 and the highest is 1.
 };
+
 #endif
 
 inline double DoubleImage::getMax(){
@@ -274,6 +276,13 @@ const std::vector<double> DoubleImage::getData() {
 inline
 void DoubleImage::increase(int x,int y,double c) {
 	data[y*width+x]+=c;
+}
+
+inline 
+void DoubleImage::zeroImage(){
+    for(int x=0;x<width;x++) 
+        for(int y=0;y<height;y++) 
+            data[y*width+x]=0;
 }
 
 inline

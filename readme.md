@@ -15,6 +15,31 @@ For a given particle at position $x_i$, we only have a collision if $\Delta x_{i
 
 Let's divide into a grid of M by M cells. We evolve by time $\Delta t$, and delta t should be small enough that we usually have 0 collisions, rarely have 1 collision, and almost never have 2 collisions (which I won't try to handle properly!)
 
+## Changes for S(v) simulation
+My recent inspiration for starting this was to answer [my stackexchange question](https://physics.stackexchange.com/q/794922/230863) with
+an md simulation. So here's a TODO list for some hacked together code to do that.
+
+- [x] Add radius and dt to CollisionSimulator
+- [x] Add findMaxH and findDt
+- [ ] write out and test CSVData.h
+- [x] Ensure step() invalidates any valid data
+- [x] Initialize CollisionStats stats
+- [x] Add initialization of StatsGrid
+- [x] Add calculation of StatsGrid
+- [x] Add CollisionStats calculations to StatsGrid updates
+- [ ] Write DoubleImage at() command.
+- [ ] Add interpolation functions to StatsGrid for ease of use
+- [ ] Add entropy per particle calculation and add entropy to phystructs
+- [ ] Update StatsPlots to use StatsGrid data
+- [ ] Update DoubleImage to accept floats
+- [ ] Add optional movableWall initialization and movement code
+- [ ] Add collisions with the movable wall.
+- [ ] Track the energy leaving the system through the wall 
+- [ ] Add the ability to draw the movable wall
+- [ ] Histogram stuff 
+
+## Other stuff
+
 Physics/writeup TODO:
 - [ ] Write the relevant formulas for the grand canonical ensemble. $\Xi(\mu,\beta)$, $S$, $w(r,p,N)$ and so on. Make sure I have a good definition of the mean free path, packing fraction, and so on.
 - [ ] Choose an appropriate $z_1(T_{ref})$ / entropy reference point. (Is there a nice "natural units" choice for absolute entropy anyways?)

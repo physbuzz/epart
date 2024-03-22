@@ -8,6 +8,7 @@
 #include "PGrid.h"
 #include "ImageUtil.h"
 #include "easytime.h"
+#include "CSVData.h"
 
 #define EPS2 0.0000001
 
@@ -41,6 +42,10 @@ inline float radialwc(float rmax,float p){
     return rmax*rmax*M_PI*(2.0f-1.0f/(1.0f+p)+2.0f*p*std::log(p/(1.0f+p)));
 }
 
+
+
+
+
 class CollisionSimulator {
 public:
     struct CollisionStats {
@@ -56,25 +61,157 @@ public:
         //fraction with two collisions detected - this should stay low!
         int nTwoOrMore; 
 
+        float currentTime;
+        float totalPx;
+        float totalPy;
+        float totalN;
+        float averagen;
+        float averageT;
         float totalS;
         float totalE;
+        bool statsAreCurrent;
     } stats;
 
     struct PhysicsQueryStruct {
         float s, n, px, py, beta, e;
     };
 
+    struct StatsGridStruct { 
+        float area;
+        int sgw,sgh;
+        DoubleImage px,py,n,beta,e,s;
+        bool statsAreCurrent;
+    } statsgrid;
+    void initializeStatsGrid(int nx, int ny){ 
+        statsgrid.sgw=nx;
+        statsgrid.sgh=ny;
+        statsgrid.px=DoubleImage(nx,ny);
+        statsgrid.py=DoubleImage(nx,ny);
+        statsgrid.n=DoubleImage(nx,ny);
+        statsgrid.beta=DoubleImage(nx,ny);
+        statsgrid.e=DoubleImage(nx,ny);
+        statsgrid.s=DoubleImage(nx,ny);
+        statsgrid.statsAreCurrent=false;
+        statsgrid.area=s.domainSize[0]*s.domainSize[1]/(statsgrid.sgw*statsgrid.sgh);
+        assert(statsgrid.area>0,"statsgrid area less than zero. PGrid not initialized?");
+    }
+    void recalculateStatsGrid() { 
+        statsgrid.px.zeroImage();
+        statsgrid.py.zeroImage();
+        statsgrid.n.zeroImage();
+
+        stats.totalPx=0;
+        stats.totalPy=0;
+        stats.totalN=0;
+        stats.averagen=0;
+        stats.averageT=0;
+        stats.totalS=0;
+        stats.totalE=0;
+        //First, get the totals that we can calculate in the first pass (total momentum, particle number,
+        //total energy)
+        for(Particle<float,2> &p : *s.plist){
+            int xindx=;
+            int yindx=;
+            statsgrid.n.increase(x,y,1);
+            statsgrid.px.increase(x,y,p.vel.x[0]);
+            statsgrid.py.increase(x,y,p.vel.x[1]);
+            statsgrid.e.increase(x,y,(p.vel.x[0]*p.vel.x[0]+p.vel.x[1]*p.vel.x[1])*0.5f);
+        }
+        for(int x=0;x<statsgrid.sgw;x++){
+            for(int y=0;y<statsgrid.sgh;y++){
+                float &e=statsgrid.e.at(x,y);
+                float &n=statsgrid.n.at(x,y);
+                float &px=statsgrid.px.at(x,y);
+                float &py=statsgrid.py.at(x,y);
+                float betadenom=e-0.5*(px*px+py*py)/n; // energy minus energy due to COM motion
+                                                       
+                float &beta=statsgrid.beta.at(x,y);
+                if(n<=1 || betadenom<=0){
+                    beta=std::numeric_limits<float>::infinity();
+                    statsgrid.s.put(x,y,0.0f);
+                } else {
+                    beta=n/betadenom;
+                    statsgrid.s.put(x,y,-(n/statsgrid.area)*std::log((n/statsgrid.area)*beta));
+                }
+
+                stats.totalE+=e;
+                stats.totalPx+=px;
+                stats.totalPy+=py;
+                stats.totalN+=n;
+
+                px=px/n;
+                py=py/n;
+                e=e/statsgrid.area;
+                n=n/statsgrid.area;
+
+                //average density is (sum_i n_i)/N ~= int n(x)^2 d^dx
+                //Think of it differently: each particle in this cell has density n.
+                //There are  n*area particles in this cell. So the total is going to be Sum(n*n*area)/N
+                stats.averageDensity+=n*n*statsgrid.area;
+                stats.averageT+=n*statsgrid.area/beta;
+                stats.totalS=statsgrid.s.get(x,y)*statsgrid.area;
+            }
+        }
+        stats.averageDensity/=stats.totalN;
+        stats.averageT/=stats.totalN;
+
+        stats.statsAreCurrent=true;
+        statsgrid.statsAreCurrent=true;
+    }
+
     PGrid<float,2> s;
     float maxH;
+    float radius;
+    float dt;
 
-    CollisionSimulator(ParticleList<float,2> &pl, VectorND<float,2> domainSize, float maxH) :
+    //Conditions for dt and maxh.
+    //dt*velocity<maxh
+    //Expected number of collisions < some critical number (I won't 
+    //guarantee this on this first pass, I guess) 
+    //A good rule of thumb is maxh ~= (safety factor)*(diameter)
+    //The factor of 6.0f is a safety factor in findDt. It means that we have to be
+    //6 standard deviations above the mean in velocity, in order to travel more 
+    //than maxH in one timestep.
+    static float findMaxH(float radius){
+        return 5*radius;
+    }
+    static float findDt(float temperature,float maxH){
+        return maxH/(6.0f*std::sqrt(2.0f*temperature));
+    }
+
+    void initializeStats(){
+        stats.collisionTime=0; 
+        stats.drawingTime=0;        
+        stats.nZero=0; 
+        stats.nOne=0; 
+        stats.nTwoOrMore=0; 
+
+        stats.currentTime=0;
+        stats.totalPx=0;
+        stats.totalPy=0;
+        stats.totalN=0;
+        stats.averagen=0;
+        stats.averageT=0;
+        stats.totalS=0;
+        stats.totalE=0;
+        stats.statsAreCurrent=false;
+    }
+
+
+    CollisionSimulator(ParticleList<float,2> &pl, VectorND<float,2> domainSize, float maxH, float radius, float dt) :
         stats{},
         s(&pl.plist,domainSize,maxH),
-        maxH(maxH)
-    { }
+        maxH(maxH),
+        radius(radius),
+        dt(dt)
+    { 
+        initializeStats();
+    }
 
 
-    void updateOnce(float radius,float dt){
+    void stepOnce(){
+        stats.statsAreCurrent=false;
+        statsgrid.statsAreCurrent=false;
         stats.nZero=0;
         stats.nOne=0;
         stats.nTwoOrMore=0;
@@ -183,6 +320,30 @@ public:
              * */
         } 
     }
+    void step(int nsteps){
+
+    }
+
+void initializeMovingWall(float xpos, float velocity) { }
+void findParticleEntropies() { }
+void saveStatsImages(imageparams,prefix,frame,n)
+void saveNewEntropyImage(imageparams,prefix,frame,n)
+float getTime() { }
+float getTotalPx() { }
+float getTotalPy() { }
+float getTotalN() { }
+float getAverageT() { }
+float getTotalS() { }
+float getTotalE() { }
+std::vector<float> getpxntSliceHistogram()
+std::vector<float> getpxntSliceHistogramRowLabels()
+std::vector<float> getpxntSliceHistogramRow1()
+std::vector<float> getpxHistogram(
+        VectorND<float,2> bl,
+        VectorND<float,2> tr,
+        float histmin,
+        float histmax,
+        float binsize) { }
     //Return physical values after sampling particles within rmax of pos.
     //c is the calculated value from radialwc(rmax,p)
     PhysicsQueryStruct querySimulation(VectorND<float,2> pos,float rmax, float p,float c=-1.0f){
@@ -433,6 +594,120 @@ public:
         outimg.save(getFilename(prefix,fnamei,padcount,".bmp"));
     }
 };
+
+
+
+void movingWallTest(int nparticles, std::string prefix, 
+    float wallVelocity,
+    float totalTime=50.0f,
+    float timePerFrame=(1.0f/60.0f),
+    int imgw=640,
+    int imgh=480, 
+    bool verbose=true) {
+
+    float temperature=1;
+    //Packing fraction. This has to be small!
+    float eta=0.06;
+
+    vec2 simulationVolume=vec2({2.0f,1.0f});
+
+    //imgw,imgh,cx,cy,realsize
+    ImageParams imageparams={imgw,imgh,simulationVolume[0]/2,simulationVolume[1]/2,simulationVolume[0]};
+
+    //particle radius and timestep
+    float r,dt,maxH;
+    int nframes,frameskip;
+
+    nframes=int(std::ceil(totalTime/timePerFrame));
+    //Satisfy packing fraction constraint (N*pi*r**2 / area == eta)
+    r=std::sqrt(eta/(nparticles*M_PI));
+
+    //Find the grid cell size for the PGrid data structure.
+    maxH=CollisionSimulator::findMaxH(r);
+
+    //dt recommended to keep a small number of collisions per timestep.
+    float dt1=CollisionSimulator::findDt(temperature,maxH);
+
+    //dt recommended to evenly get the number of frames.
+    float dt2=totalTime/nframes;
+    if(dt2<dt1){
+        //If we request a high framerate, we can just have 1 simulation step
+        //per frame.
+        dt=dt2;
+        frameskip=1;
+    } else {
+        //else we have multiple collisions per frame of output, so we need
+        //multiple substeps.
+        frameskip=std::ceil(dt2/dt1);
+        dt=dt2/frameskip;
+        //The conditions being satisfied here are
+        //dt2 == dt*frameskip, and dt<=dt1
+    }
+
+    ParticleList<float,2> plist();
+    plist.placeVolume(vec2({0.0f,0.0f}),vec2({1.0f,1.0f}),nparticles,temperature);
+
+    Simulator s(simulationVolume,maxH);
+    s.ingestParticles(plist);
+
+    //s::initializeMovingWall(float xpos, float v);
+    s.initializeMovingWall(1.0f,wallVelocity);
+
+    //StatisticsGrid finds n,beta,px,py by dividing space into a grid.
+    s.initializeStatisticsGrid(imgw/2,imgw/4);
+    s.recalculateStatisticsGrid();
+    s.findParticleEntropies(); //update internal "entropy per particle" calculation
+
+    //CSV of other stuff (energy, total entropy, etc.)
+    CSVData simData("sim_data.csv");
+    simData.newColumn("time");
+    simData.newColumn("Px");
+    simData.newColumn("Py");
+    simData.newColumn("N");
+    simData.newColumn("N_true");
+    simData.newColumn("T");
+    simData.newColumn("S");
+    simData.newColumn("E");
+    //Histograms of parameters with y integrated out. px,py,n,t.
+    CSVData pxntSliceHistogram("pxnt_slice_hist.csv");
+    //Particle data in the center of the screen
+    CSVData pxCenterHistogram("px_hist.csv");
+    float pxHistogramMin=-3;
+    float pxHistogramMax=-3;
+    float pxHistogramBinSize=0.05;
+    float pxHistogramSize=0.2;
+
+
+    for(int frame=0;frame<nframes;frame++){
+        s.step(dt,frameskip);
+        
+        s.recalculateStatisticsGrid();
+        s.findParticleEntropies();
+
+        //Plots of px,py,n,T,s
+        s.saveStatsImages(imageparams,prefix,frame,4);
+
+        //Plots of the entropy generated
+        s.saveEntropyGeneratedImage(imageparams,prefix,frame,4);
+
+        //Save simulation parameters like total energy, 
+        simData.newRow(s.getTime(),s.getTotalPx(),s.getTotalPy(),s.getTotalN(),nparticles,s.getAverageT(),s.getTotalS(), s.getTotalE());
+        simData.save();
+
+        //Save momentum histogram
+        pxntSliceHistogram.newRow(s.getpxntSliceHistogram());
+        pxntSliceHistogram.save();
+
+        //Save momentum histogram
+        pxCenterHistogram.newRow(s.getpxHistogram(
+                    vec2({simulationVolume[0]/2-pxHistogramSize/2,simulationVolume[1]/2-pxHistogramSize/2}),
+                    vec2({simulationVolume[0]/2+pxHistogramSize/2,simulationVolume[1]/2+pxHistogramSize/2}),
+                    pxHistogramMin,
+                    pxHistogramMax,
+                    pxHistogramBinSize));
+        pxCenterHistogram.save();
+    }
+}
 
 int main() {
     float temperature=1.0f;
