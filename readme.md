@@ -31,6 +31,8 @@ an md simulation. So here's a TODO list for some hacked together code to do that
 - [x] Write DoubleImage at() command.
 - [x] Add interpolation functions to StatsGrid for ease of use
 - [x] Get stuff compiling with the CSV and stats rework. (Note: current approach overestimates density and underestimates temperature, which is desired in some circumstances and not desired in others)
+- [ ] Test that visualization works with the new-ish code
+- [ ] Update visualization to work with statsgrid (but we probably still want to keep both viz methods around)
 - [ ] Add entropy per particle calculation and add entropy to phystructs
 - [ ] Add the entropy change image generation
 - [ ] Update StatsPlots to use StatsGrid data
