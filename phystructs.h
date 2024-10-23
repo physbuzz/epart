@@ -10,6 +10,8 @@ struct Particle {
     VectorND<Float,DIM> posnew;
     VectorND<Float,DIM> velnew;
     int collision;
+    float lasts;
+    float thiss;
 };
 
 #endif

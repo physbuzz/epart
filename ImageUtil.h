@@ -89,7 +89,6 @@ public:
 	void unitStretch(); //scale and translate so that the lowest value is 0 and the highest is 1.
 };
 
-#endif
 
 inline double DoubleImage::getMax(){
 	double max=data[0];
@@ -413,3 +412,5 @@ RGB hsl2rgb(float h, float s, float l) {
   return result;
 
 }
+
+#endif

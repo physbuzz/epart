@@ -1,0 +1,12 @@
+- [x] Add radius and dt to CollisionSimulator
+- [x] Add findMaxH and findDt
+- [ ] write out and test CSVData.h
+- [x] Ensure step() invalidates any valid data
+- [x] Initialize CollisionStats stats
+- [x] Add initialization of StatsGrid
+- [x] Add calculation of StatsGrid
+- [x] Add CollisionStats calculations to StatsGrid updates
+- [ ] Add interpolation of StatsGrid for ease of use
+- [ ] Add entropy per particle calculation and add entropy to phystructs
+- [ ] Update StatsPlots to use StatsGrid data
+- [ ] Update DoubleImage to accept floats

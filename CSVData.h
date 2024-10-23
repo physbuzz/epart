@@ -1,3 +1,6 @@
+#ifndef CSVDATA_H
+#define CSVDATA_H
+
 #include <cstdarg> 
 #include <string>
 #include <vector>
@@ -56,3 +59,4 @@ public:
         output.close();
     }
 };
+#endif

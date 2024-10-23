@@ -22,7 +22,7 @@ an md simulation. So here's a TODO list for some hacked together code to do that
 - [x] Add radius and dt to CollisionSimulator
 - [x] Add findMaxH and findDt
 - [x] write out CSVData.h
-- [ ] Proper CSVData tests
+- [ ] Proper CSVData tests / debugging considerations
 - [x] Ensure step() invalidates any valid data
 - [x] Initialize CollisionStats stats
 - [x] Add initialization of StatsGrid
@@ -31,7 +31,10 @@ an md simulation. So here's a TODO list for some hacked together code to do that
 - [x] Write DoubleImage at() command.
 - [x] Add interpolation functions to StatsGrid for ease of use
 - [x] Get stuff compiling with the CSV and stats rework. (Note: current approach overestimates density and underestimates temperature, which is desired in some circumstances and not desired in others)
-- [ ] Test that visualization works with the new-ish code
+- [x] Test that visualization works with the new-ish code
+- [ ] Test that circle drawing works with the new-ish code
+- [ ] Remove outdated stats from old drawing code.
+- [ ] Remove unnecessary unused commented out code
 - [ ] Update visualization to work with statsgrid (but we probably still want to keep both viz methods around)
 - [ ] Add entropy per particle calculation and add entropy to phystructs
 - [ ] Add the entropy change image generation
