@@ -481,7 +481,7 @@ public:
                 if(bl[k]==tr[k])
                     empty=true;
             }
-            if(empty)
+            if(empty || pg->needsRebuild)
                 bl=tr;
         }
         PGridRectIt begin() { 
