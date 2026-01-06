@@ -4,3 +4,6 @@ epart-fast
 *.swp
 *.mp4
 runs
+epart/build/**
+!epart/build/release/epart
+!epart/build/debug/epart
